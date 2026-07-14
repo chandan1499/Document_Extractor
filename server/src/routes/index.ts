@@ -1,4 +1,4 @@
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, RequestHandler } from "express";
 import { Multer } from "multer";
 import { LLMProvider, DocType, Guideline } from "../types.js";
 import { DocumentRepository } from "../types.js";
@@ -6,6 +6,8 @@ import { CorrectionRepository } from "../types.js";
 import { extractDocument } from "../pipeline/index.js";
 import { extractTextFromFile } from "../utils/fileExtractor.js";
 import { logger } from "../config/logger.js";
+
+type FileRequest = Request & { file?: Express.Multer.File };
 
 export function createRoutes(
   docRepo: DocumentRepository,
@@ -63,8 +65,8 @@ export function createRoutes(
   if (upload) {
     router.post(
       "/api/extract-file",
-      upload.single("file"),
-      async (req: Request & { file?: Express.Multer.File }, res: Response) => {
+      upload.single("file") as unknown as RequestHandler,
+      async (req: FileRequest, res: Response) => {
         try {
           if (!req.file) {
             return res.status(400).json({ error: "No file provided" });
