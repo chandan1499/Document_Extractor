@@ -1,0 +1,26 @@
+{
+  "name": "document-extraction-app",
+  "version": "1.0.0",
+  "description": "A production-quality document extraction app using LLMs",
+  "private": true,
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "install": "npm install --workspaces",
+    "dev": "npm run dev --workspaces",
+    "build": "npm run build --workspaces",
+    "test": "npm test --workspace=server"
+  },
+  "keywords": [
+    "llm",
+    "extraction",
+    "document-processing",
+    "groq",
+    "react",
+    "express"
+  ],
+  "author": "",
+  "license": "MIT"
+}

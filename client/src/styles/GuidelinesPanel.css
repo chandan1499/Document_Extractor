@@ -1,0 +1,99 @@
+.guidelines-panel {
+  background: white;
+  padding: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  height: 100%;
+  overflow: auto;
+}
+
+.guidelines-panel h2 {
+  margin-bottom: 0.5rem;
+  color: var(--dark);
+}
+
+.panel-intro {
+  color: var(--gray);
+  margin-bottom: 1.5rem;
+}
+
+.guidelines-controls {
+  margin-bottom: 1.5rem;
+}
+
+.learning-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+}
+
+.learning-section h3 {
+  margin-bottom: 1rem;
+  color: var(--dark);
+}
+
+.learning-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.learning-card {
+  background: var(--light);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem;
+}
+
+.learning-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.badge {
+  background: #e8f1ff;
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.rule-text {
+  margin: 0.35rem 0;
+  white-space: pre-wrap;
+}
+
+.correction-diff {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+.correction-diff code {
+  background: white;
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  word-break: break-all;
+}
+
+.empty-state,
+.loading-text {
+  color: var(--gray);
+}
+
+@media (max-width: 768px) {
+  .learning-columns {
+    grid-template-columns: 1fr;
+  }
+}
