@@ -1,6 +1,6 @@
 import { ExtractedDocument, Guideline } from "../types/index";
 
-const API_BASE = "/api";
+const API_BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/$/, "");
 
 export async function extractDocument(text: string, docType?: string) {
   const response = await fetch(`${API_BASE}/extract`, {
