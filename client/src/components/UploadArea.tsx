@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { ExtractedDocument } from "../types/index";
 import { extractDocument, extractDocumentFromFile } from "../services/api";

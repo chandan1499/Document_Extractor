@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ExtractedDocument } from "../types/index";
 import { listDocuments } from "../services/api";
 import DocumentModal from "./DocumentModal";
