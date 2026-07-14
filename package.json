@@ -8,7 +8,6 @@
     "client"
   ],
   "scripts": {
-    "install": "npm install --workspaces",
     "dev": "npm run dev --workspaces",
     "build": "npm run build --workspaces",
     "test": "npm test --workspace=server"
