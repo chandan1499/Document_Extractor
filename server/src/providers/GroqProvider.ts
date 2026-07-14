@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import type { ChatCompletion } from "openai/resources/chat/completions";
 import { LLMProvider, DocType, Guideline, ExtractResult } from "../types.js";
 import { logger } from "../config/logger.js";
 
@@ -210,7 +211,7 @@ Rules for appliedChanges:
       "📝 LLM EXTRACT: User input text"
     );
 
-    const response = await this.client.chat.completions.create({
+    const response = (await this.client.chat.completions.create({
       model: this.extractModel,
       messages: [
         {
@@ -228,11 +229,11 @@ Rules for appliedChanges:
         type: "json_schema",
         json_schema: {
           name: "extraction",
-          schema: responseSchema as Parameters<typeof JSON.stringify>[0],
+          schema: responseSchema as Record<string, unknown>,
           strict: true,
         },
       },
-    } as Parameters<typeof this.client.chat.completions.create>[0]);
+    })) as ChatCompletion;
 
     try {
       const content = response.choices[0].message.content;
