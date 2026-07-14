@@ -46,7 +46,7 @@ Focus on:
 - Links: LinkedIn and GitHub profile URLs (use empty strings if not found)
 - Professional summary/objective
 - Work experience (company, position, dates, description)
-- Education (school, degree, field, graduation date)
+- Education (school, degree, graduation date)
 - Skills
 
 For links.linkedin and links.github, prefer full URLs when present (e.g. https://linkedin.com/in/..., https://github.com/...).

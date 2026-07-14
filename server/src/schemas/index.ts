@@ -102,7 +102,6 @@ export const ResumeSchema = z.object({
     z.object({
       school: z.string(),
       degree: z.string(),
-      field: optionalString,
       graduationDate: optionalString,
     })
   ),

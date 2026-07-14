@@ -94,6 +94,28 @@ export async function getDocument(id: string) {
   return (await response.json()) as ExtractedDocument;
 }
 
+export async function submitCorrectionsBatch(
+  docId: string,
+  corrections: Array<{
+    field: string;
+    originalValue: unknown;
+    correctedValue: unknown;
+  }>,
+  learningNotes?: string
+) {
+  const response = await fetch(`${API_BASE}/documents/${docId}/correct-batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ corrections, learningNotes }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to submit corrections");
+  }
+
+  return await response.json();
+}
+
 export async function submitCorrection(
   docId: string,
   field: string,

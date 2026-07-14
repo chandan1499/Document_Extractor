@@ -1,6 +1,12 @@
 import OpenAI from "openai";
 import type { ChatCompletion } from "openai/resources/chat/completions";
-import { LLMProvider, DocType, Guideline, ExtractResult } from "../types.js";
+import {
+  LLMProvider,
+  DocType,
+  Guideline,
+  ExtractResult,
+  CorrectionInput,
+} from "../types.js";
 import { logger } from "../config/logger.js";
 
 function wrapSchemaWithChanges(
@@ -307,6 +313,85 @@ Rules for appliedChanges:
         "❌ LLM EXTRACT: Data extraction failed"
       );
       throw new Error(`Data extraction failed: ${errorMsg}`);
+    }
+  }
+
+  async extractLearningRules(
+    docType: DocType,
+    corrections: CorrectionInput[],
+    learningNotes: string
+  ): Promise<string[]> {
+    const trimmed = learningNotes.trim();
+    if (!trimmed) return [];
+
+    const correctionsText = corrections
+      .map(
+        (c) =>
+          `- ${c.field}: ${JSON.stringify(c.originalValue)} → ${JSON.stringify(c.correctedValue)}`
+      )
+      .join("\n");
+
+    const prompt = `Document type: ${docType}
+
+The user manually corrected these extracted fields:
+${correctionsText || "(no field-level diffs recorded)"}
+
+The user provided these learning notes (may contain multiple rules):
+"""
+${trimmed}
+"""
+
+Extract every distinct, reusable rule the system should apply on future ${docType} extractions.
+Return one rule per item — split bullet points, numbered lists, and separate sentences into separate rules when they describe different behaviors.
+Each rule must be self-contained and actionable (what field or pattern to change and how).
+Do not merge unrelated rules into one string.`;
+
+    logger.info(
+      {
+        docType,
+        correctionCount: corrections.length,
+        notesLength: trimmed.length,
+      },
+      "🧠 LLM LEARN: Extracting rules from learning notes"
+    );
+
+    try {
+      const response = await this.client.chat.completions.create({
+        model: this.classifyModel,
+        messages: [
+          {
+            role: "system",
+            content:
+              'You extract reusable document-extraction rules from user feedback. Respond only with valid JSON in the format {"rules": ["rule one", "rule two"]}.',
+          },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0,
+        max_tokens: 1000,
+        response_format: { type: "json_object" },
+      });
+
+      const content = response.choices[0].message.content;
+      if (!content) throw new Error("Empty response from Groq");
+
+      const parsed = JSON.parse(content) as { rules?: string[] };
+      const rules = (parsed.rules || [])
+        .map((r) => r.trim())
+        .filter((r) => r.length > 0);
+
+      logger.info(
+        { ruleCount: rules.length },
+        "✅ LLM LEARN: Rules extracted from learning notes"
+      );
+
+      return rules.length > 0 ? rules : [trimmed];
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      logger.warn(
+        { error: errorMsg },
+        "⚠️ LLM LEARN: Rule extraction failed, storing notes as single rule"
+      );
+      return [trimmed];
     }
   }
 }

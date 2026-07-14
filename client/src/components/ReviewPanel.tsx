@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ExtractedDocument } from "../types/index";
-import { saveDocument, submitCorrection } from "../services/api";
+import { saveDocument, submitCorrectionsBatch } from "../services/api";
 import { humanizeLabel } from "../utils/labels";
 import "../styles/ReviewPanel.css";
 
@@ -13,7 +13,6 @@ interface ReviewPanelProps {
 interface FieldEdit {
   original: unknown;
   corrected: unknown;
-  explanation: string;
 }
 
 function getByPath(obj: unknown, path: string): unknown {
@@ -103,6 +102,7 @@ export default function ReviewPanel({
   const [corrections, setCorrections] = useState<Map<string, FieldEdit>>(
     new Map(),
   );
+  const [learningNotes, setLearningNotes] = useState("");
   const [appliedChanges, setAppliedChanges] = useState(
     document.appliedChanges || [],
   );
@@ -120,7 +120,6 @@ export default function ReviewPanel({
         next.set(fieldPath, {
           original,
           corrected: value,
-          explanation: prev.get(fieldPath)?.explanation || "",
         });
       } else {
         next.delete(fieldPath);
@@ -128,16 +127,6 @@ export default function ReviewPanel({
       return next;
     });
     setEditedData((prev) => setByPath(prev, fieldPath, value));
-  };
-
-  const handleExplanationChange = (field: string, explanation: string) => {
-    setCorrections((prev) => {
-      const correction = prev.get(field);
-      if (!correction) return prev;
-      const next = new Map(prev);
-      next.set(field, { ...correction, explanation });
-      return next;
-    });
   };
 
   const handleAcceptFields = (fields: string[]) => {
@@ -213,13 +202,15 @@ export default function ReviewPanel({
 
       const saved = await saveDocument(docToSave);
 
-      for (const [field, correction] of corrections.entries()) {
-        await submitCorrection(
+      if (corrections.size > 0) {
+        await submitCorrectionsBatch(
           saved.id,
-          field,
-          correction.original,
-          correction.corrected,
-          correction.explanation || undefined,
+          [...corrections.entries()].map(([field, correction]) => ({
+            field,
+            originalValue: correction.original,
+            correctedValue: correction.corrected,
+          })),
+          learningNotes.trim() || undefined,
         );
       }
 
@@ -365,38 +356,30 @@ export default function ReviewPanel({
                 <div key={field} className="field-group">
                   <label>{humanizeLabel(field)}</label>
                   {renderField(field, value)}
-
-                  {corrections.has(field) && (
-                    <div className="correction-note">
-                      <textarea
-                        placeholder="Why did the LLM get this wrong? (optional - helps it learn)"
-                        value={corrections.get(field)?.explanation || ""}
-                        onChange={(e) =>
-                          handleExplanationChange(field, e.target.value)
-                        }
-                        className="explanation-input"
-                      />
-                    </div>
-                  )}
                 </div>
               ))}
 
-            {/* Nested path corrections need explanation UI too */}
-            {[...corrections.keys()]
-              .filter((path) => path.includes("."))
-              .map((path) => (
-                <div key={`corr-${path}`} className="correction-note nested-correction">
-                  <label>{humanizeLabel(path)}</label>
-                  <textarea
-                    placeholder="Why did the LLM get this wrong? (optional - helps it learn)"
-                    value={corrections.get(path)?.explanation || ""}
-                    onChange={(e) =>
-                      handleExplanationChange(path, e.target.value)
-                    }
-                    className="explanation-input"
-                  />
-                </div>
-              ))}
+            {hasCorrections && (
+              <div className="learning-notes-section">
+                <label htmlFor="learning-notes">
+                  Learning notes for {corrections.size} correction
+                  {corrections.size === 1 ? "" : "s"} (optional)
+                </label>
+                <p className="learning-notes-hint">
+                  Describe why the extraction was wrong. You can include multiple
+                  rules in one note — the system will extract and remember each
+                  rule separately.
+                </p>
+                <textarea
+                  id="learning-notes"
+                  placeholder={`e.g.\n• Vendor is always ZOMATO LIMITED, not ZMT LIMITED\n• Total must include GST\n• Invoice date format is DD/MM/YYYY`}
+                  value={learningNotes}
+                  onChange={(e) => setLearningNotes(e.target.value)}
+                  className="explanation-input learning-notes-input"
+                  rows={4}
+                />
+              </div>
+            )}
 
             {appliedChanges && appliedChanges.length > 0 && (
               <div className="applied-changes-section">
@@ -586,8 +569,10 @@ export default function ReviewPanel({
 
       {hasCorrections && (
         <div className="info-message">
-          💡 {corrections.size} correction(s) will be submitted. Add
-          explanations to help the LLM learn!
+          💡 {corrections.size} correction(s) will be submitted.
+          {learningNotes.trim()
+            ? " Your learning notes will be parsed into rules for future extractions."
+            : " Add learning notes above to teach the system from your fixes."}
         </div>
       )}
     </div>

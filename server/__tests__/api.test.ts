@@ -26,6 +26,12 @@ const mockLlm: LLMProvider = {
       notes: "",
     },
   }),
+  extractLearningRules: async (_docType, _corrections, learningNotes) => {
+    return learningNotes
+      .split(/\n|;/)
+      .map((r) => r.replace(/^[\s•\-*\d.)]+/, "").trim())
+      .filter(Boolean);
+  },
 };
 
 describe("API integration", () => {
@@ -94,5 +100,43 @@ describe("API integration", () => {
       .expect(200);
 
     expect(empty.body.length).toBe(0);
+  });
+
+  it("POST /api/documents/:id/correct-batch saves corrections and extracts rules", async () => {
+    const extract = await request(app)
+      .post("/api/extract")
+      .send({ text: "Invoice INV-1 from ACME" })
+      .expect(200);
+
+    const saved = await request(app)
+      .post("/api/documents")
+      .send(extract.body)
+      .expect(201);
+
+    const batch = await request(app)
+      .post(`/api/documents/${saved.body.id}/correct-batch`)
+      .send({
+        corrections: [
+          {
+            field: "vendor.name",
+            originalValue: "ACME",
+            correctedValue: "ACME Cloud",
+          },
+          {
+            field: "total",
+            originalValue: 10,
+            correctedValue: 12,
+          },
+        ],
+        learningNotes:
+          "Vendor is always ACME Cloud\nTotal must include 20% GST",
+      })
+      .expect(201);
+
+    expect(batch.body.corrections).toHaveLength(2);
+    expect(batch.body.guidelines.length).toBeGreaterThanOrEqual(2);
+
+    const guidelines = await request(app).get("/api/guidelines").expect(200);
+    expect(guidelines.body.length).toBeGreaterThanOrEqual(2);
   });
 });

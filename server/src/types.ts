@@ -96,6 +96,12 @@ export interface ExtractResult<T> {
   appliedChanges?: ExtractionChange[];
 }
 
+export interface CorrectionInput {
+  field: string;
+  originalValue: unknown;
+  correctedValue: unknown;
+}
+
 // LLM Provider
 export interface LLMProvider {
   classify(text: string): Promise<DocType>;
@@ -105,4 +111,10 @@ export interface LLMProvider {
     prompt: string,
     guidelines?: Guideline[]
   ): Promise<ExtractResult<T>>;
+  /** Parse one user learning note into distinct reusable extraction rules */
+  extractLearningRules(
+    docType: DocType,
+    corrections: CorrectionInput[],
+    learningNotes: string
+  ): Promise<string[]>;
 }

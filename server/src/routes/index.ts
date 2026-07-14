@@ -1,6 +1,6 @@
 import { Router, Request, Response, RequestHandler } from "express";
 import { Multer } from "multer";
-import { LLMProvider, DocType, Guideline } from "../types.js";
+import { LLMProvider, DocType, Guideline, CorrectionInput } from "../types.js";
 import { DocumentRepository } from "../types.js";
 import { CorrectionRepository } from "../types.js";
 import { extractDocument } from "../pipeline/index.js";
@@ -184,6 +184,81 @@ export function createRoutes(
       res.status(500).json({ error: "Failed to fetch document" });
     }
   });
+
+  /**
+   * POST /api/documents/:id/correct-batch
+   * Submit multiple corrections with one shared learning note; LLM extracts rules.
+   */
+  router.post(
+    "/api/documents/:id/correct-batch",
+    async (req: Request, res: Response) => {
+      try {
+        const { corrections, learningNotes } = req.body as {
+          corrections?: CorrectionInput[];
+          learningNotes?: string;
+        };
+
+        if (!Array.isArray(corrections) || corrections.length === 0) {
+          return res
+            .status(400)
+            .json({ error: "corrections must be a non-empty array" });
+        }
+
+        const doc = await docRepo.findById(req.params.id);
+        if (!doc) {
+          return res.status(404).json({ error: "Document not found" });
+        }
+
+        const savedCorrections = [];
+        for (const item of corrections) {
+          const correction = await correctionRepo.saveCorrection({
+            id: "",
+            docType: doc.type,
+            field: item.field,
+            originalValue: item.originalValue,
+            correctedValue: item.correctedValue,
+            contextSnippet: doc.originalText.slice(0, 200),
+            userExplanation: learningNotes?.trim() || undefined,
+            createdAt: new Date().toISOString(),
+          });
+          savedCorrections.push(correction);
+        }
+
+        const guidelines = [];
+        const notes = learningNotes?.trim();
+        if (notes) {
+          const rules = await llmProvider.extractLearningRules(
+            doc.type,
+            corrections,
+            notes
+          );
+          const sourceIds = savedCorrections.map((c) => c.id);
+          for (const rule of rules) {
+            const guideline = await correctionRepo.saveGuideline({
+              id: "",
+              docType: doc.type,
+              rule,
+              sourceCorrectionIds: sourceIds,
+              createdAt: new Date().toISOString(),
+            });
+            guidelines.push(guideline);
+          }
+        }
+
+        res.status(201).json({
+          corrections: savedCorrections,
+          guidelines,
+          message:
+            guidelines.length > 0
+              ? `Saved ${savedCorrections.length} correction(s) and ${guidelines.length} learned rule(s)`
+              : `Saved ${savedCorrections.length} correction(s)`,
+        });
+      } catch (error) {
+        logger.error(error, "Batch correction request failed");
+        res.status(500).json({ error: "Failed to save corrections" });
+      }
+    }
+  );
 
   /**
    * POST /api/documents/:id/correct

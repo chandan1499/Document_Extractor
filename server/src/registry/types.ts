@@ -107,10 +107,9 @@ export const TResumeSchema = {
         properties: {
           school: { type: "string" },
           degree: { type: "string" },
-          field: { type: "string" },
           graduationDate: { type: "string" },
         },
-        required: ["school", "degree", "field", "graduationDate"],
+        required: ["school", "degree", "graduationDate"],
         additionalProperties: false,
       },
     },
