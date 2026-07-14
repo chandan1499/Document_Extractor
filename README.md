@@ -2,9 +2,19 @@
 
 A production-quality web application that converts unstructured or semi-structured documents into structured, searchable data using AI (LLM).
 
+## Live Demo
+
+- **App:** https://document-extractor-01.netlify.app/
+- **API:** https://document-extractor-mc4d.onrender.com/api/
+- **GitHub:** https://github.com/chandan1499/Document_Extractor
+
+> **Note:** The Render free tier sleeps after inactivity — the first request may take 30–60 seconds to wake up.
+
 ## Problem Interpretation
 
-Most organizations deal with a sea of unstructured documents (invoices, resumes, meeting notes, contracts, etc.). Manually extracting key information from these documents is error-prone, time-consuming, and doesn't scale. This app automates that process by leveraging LLMs to intelligently extract structured data, validate it, and learn from human corrections.
+Finance and operations teams receive invoices, resumes, and meeting notes as email text, PDFs, and spreadsheets. Manually re-keying that data into systems is slow and error-prone. This app targets that workflow: paste or upload a document, review structured fields, save queryable records, and teach the system from corrections so future extractions improve.
+
+The core challenge is scale — organizations deal with a sea of unstructured documents where manual extraction doesn't hold up. LLMs can intelligently extract structured data, but output needs validation, human review, and a feedback loop to stay accurate over time.
 
 ## Scope & Assumptions
 
@@ -31,7 +41,7 @@ Most organizations deal with a sea of unstructured documents (invoices, resumes,
 - **OCR for scanned documents** — Groq vision models are included as a stretch feature, but primary path is text-based.
 - **Analytics/Dashboard** — Beyond MVP scope; future improvement.
 - **Automatic duplicate detection** — Would require embedding models and similarity search; deferred to a second phase.
-- **UI for managing learned guidelines** — Corrections are learned and applied, but there's no admin panel to edit guidelines directly.
+- **Edit/delete learned guidelines** — The Learning tab is view-only; corrections become guidelines automatically, but rules cannot be edited or removed in the UI.
 
 ## Architecture
 
@@ -59,7 +69,7 @@ Ingest → Preprocess → Classify → Extract → Validate → Review → Save
   
 /client
   /src
-    /components        React components (Upload, Review, DocumentList)
+    /components        React components (Upload, Review, DocumentList, GuidelinesPanel, DocumentModal)
     /services          API client
     /types             TypeScript types
     /styles            Component-level CSS
@@ -199,9 +209,9 @@ interface CorrectionRepository {
 - **State**: Zustand (not used yet; ready for future features)
 
 ### Deployment
-- **Frontend**: Vercel (or any static host)
-- **Backend**: Render / Railway free tier
-- **Data**: JSON file on persistent disk (Render Disk, Railway Volume)
+- **Frontend**: Netlify (static Vite build)
+- **Backend**: Render (Express API)
+- **Data**: JSON file on persistent disk (Render Disk)
 
 ## AI Model Selection
 
@@ -233,47 +243,54 @@ Alternatives (future):
 - Anthropic (Claude) — excellent reasoning, cost
 - Local (Llama 2 via Ollama) — privacy, no API costs
 
+## Quick Demo
+
+Try the live app at https://document-extractor-01.netlify.app/ or run locally:
+
+1. **Upload** — Paste sample invoice text (or use Advanced → upload a PDF/CSV/image).
+2. **Review** — Check extracted fields; fix any wrong values (e.g. vendor name).
+3. **Learn** — Add an explanation when correcting: *"Vendor is always ACME Cloud, not ACME Cloud Billing"*.
+4. **Save** — Store the document.
+5. **Query** — Open **Documents**, search with `vendor.name` = `ACME` or `total.gt` = `50000`.
+6. **Learning tab** — See the guideline and correction history from step 3.
+
 ## Setup
 
 ### Prerequisites
-- Node.js 18+
-- Groq API key (free from console.groq.com)
+- Node.js 18+ (see `client/.nvmrc` for Node 20)
+- Groq API key (free from [console.groq.com](https://console.groq.com))
 
 ### Installation
 
-1. **Clone & install**
+1. **Clone & install** (from repo root)
    ```bash
-   cd server && npm install
-   cd ../client && npm install
+   git clone https://github.com/chandan1499/Document_Extractor.git
+   cd Document_Extractor
+   yarn install
    ```
 
-2. **Install server dependencies** (includes file processing libraries)
+2. **Configure environment**
    ```bash
-   cd server && npm install
-   ```
-
-3. **Configure environment**
-   ```bash
-   cd server
-   cp .env.example .env
-   # Edit .env with your GROQ_API_KEY
+   cp server/.env.example server/.env
+   # Edit server/.env — set GROQ_API_KEY and model names
    # Check https://console.groq.com/keys for available models
-   # Update EXTRACT_MODEL and CLASSIFY_MODEL accordingly
    ```
 
-4. **Run locally**
+3. **Run locally**
    ```bash
-   # Terminal 1: Backend
-   cd server && npm run dev
-   
-   # Terminal 2: Frontend
-   cd client && npm run dev
+   yarn dev
    ```
 
-   Frontend: http://localhost:5173 (Vite dev server proxies `/api` → http://localhost:4000)
-   Backend: http://localhost:4000
+   - Frontend: http://localhost:5173 (Vite proxies `/api` → http://localhost:4000)
+   - Backend: http://localhost:4000
 
-5. **Run tests**
+   Or run separately:
+   ```bash
+   cd server && npm run dev   # Terminal 1
+   cd client && npm run dev   # Terminal 2
+   ```
+
+4. **Run tests**
    ```bash
    cd server && npm test
    ```
@@ -286,18 +303,20 @@ Not included in this MVP, but ready to containerize. Suggested:
 ## Future Improvements
 
 ### Recently Completed
-- ✅ CSV file extraction (converted to formatted text)
-- ✅ Image extraction with OCR (tesseract.js, supports JPG/PNG/GIF/WebP)
-- ✅ PDF text extraction
-- ✅ Modal view for complete document details
-- ✅ Centered loading overlay during extraction
-- ✅ Scrollable error/warning section in review panel
-- ✅ Fixed height layout with independent scrolling sections
+- ✅ Netlify frontend + Render backend deployment
+- ✅ Learning tab (view guidelines and correction history)
+- ✅ Field-level query UI (`vendor.name`, `total.gt`, free-text `q`)
+- ✅ Nested field editing in review panel (line items, vendor blocks)
+- ✅ Single-call LLM extraction with `appliedChanges` envelope
+- ✅ API integration tests (22 tests, mocked LLM)
+- ✅ CSV / PDF / image OCR extraction
+- ✅ Modal view, loading overlay, scrollable validation panel
 
 ### Short Term (Next Sprint)
 - [ ] DOCX support (python-docx or similar library on the server)
 - [ ] Per-field confidence scores (ask the LLM to emit `confidence` field)
-- [ ] UI for managing learned guidelines (edit/delete rules)
+- [ ] Edit/delete learned guidelines in the UI
+- [ ] Sample documents in `/samples/` for one-click demo
 - [ ] Improved error messages and debugging information
 
 ### Medium Term
@@ -338,22 +357,33 @@ Tests use mocked LLM responses to be deterministic and free.
 
 ## Deployment
 
-### Frontend (Vercel)
-```bash
-cd client
-npm run build
-# Vercel auto-detects Vite, deploys `dist/`
-```
-Set env var `VITE_API_BASE=https://your-backend.com` if backend is on a different host.
+### Frontend (Netlify)
 
-### Backend (Render / Railway)
-```bash
-# Render: connect GitHub repo, set build command: cd server && npm run build
-# Start command: npm start
-# Env vars: GROQ_API_KEY, PORT, etc.
+Configured via `netlify.toml` at the repo root:
+
+```toml
+[build]
+  base = "client"
+  command = "npm run build"
+  publish = "dist"
 ```
 
-Data persists in `./data/` if the host has persistent disk (Render Disk, Railway Volume). On ephemeral filesystems (Vercel Functions), data is lost on redeploy — consider this a limitation of the demo. For production: use a real database.
+Set this environment variable in the Netlify dashboard:
+
+```
+VITE_API_URL=https://document-extractor-mc4d.onrender.com/api
+```
+
+The client reads `VITE_API_URL` (falls back to `/api` for local dev with the Vite proxy).
+
+### Backend (Render)
+
+- **Root directory:** `server`
+- **Build command:** `npm install && npm run build`
+- **Start command:** `npm start`
+- **Env vars:** `GROQ_API_KEY`, `PORT`, `EXTRACT_MODEL`, `CLASSIFY_MODEL`, `DATA_DIR=./data`
+
+Enable a persistent disk on Render so `./data/` survives redeploys. On ephemeral filesystems, saved documents and learned guidelines are lost on restart.
 
 ## Known Limitations
 
@@ -365,7 +395,7 @@ Data persists in `./data/` if the host has persistent disk (Render Disk, Railway
 6. **No OAuth**: Anyone with the URL can upload. Add auth (Clerk, Auth0) for production.
 7. **PDF handling**: `pdf-parse` works for text-based PDFs only. Scanned PDFs (image-only) require OCR via image extraction.
 8. **CSV handling**: Converts CSV to formatted text; complex nested structures may not extract optimally.
-9. **No clear primary user persona**: The README does not define a primary user (e.g. AP clerk, recruiter, ops analyst). Positioning stays generic rather than a sharp persona with a concrete workflow.
+9. **Render cold starts**: Free-tier backend sleeps after inactivity; first request may take 30–60 seconds.
 10. **Search is JSON-file backed**: Nested paths (`vendor.name`) and comparisons (`total.gt`) work in-memory over the JSON store, but this is not indexed SQL — fine for demos, not large-scale query workloads.
 
 ## README Maintenance
@@ -387,7 +417,6 @@ MIT
 
 ## Deployment URLs
 
-_Add these once deployed:_
-- Frontend: (TBD)
-- Backend: (TBD)
-- GitHub: (TBD)
+- **Frontend:** https://document-extractor-01.netlify.app/
+- **Backend API:** https://document-extractor-mc4d.onrender.com/api/
+- **GitHub:** https://github.com/chandan1499/Document_Extractor
