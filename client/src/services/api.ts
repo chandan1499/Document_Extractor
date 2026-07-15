@@ -1,4 +1,4 @@
-import { ExtractedDocument, Guideline } from "../types/index";
+import { ExtractedDocument, Guideline, PaginatedResult } from "../types/index";
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/$/, "");
 
@@ -65,7 +65,9 @@ export async function saveDocument(doc: ExtractedDocument) {
   return (await response.json()) as ExtractedDocument;
 }
 
-export async function listDocuments(filters?: Record<string, unknown>) {
+export async function listDocuments(
+  filters?: Record<string, unknown>
+): Promise<PaginatedResult<ExtractedDocument>> {
   const params = new URLSearchParams();
   if (filters) {
     Object.entries(filters).forEach(([key, value]) => {
@@ -81,7 +83,24 @@ export async function listDocuments(filters?: Record<string, unknown>) {
     throw new Error("Failed to fetch documents");
   }
 
-  return (await response.json()) as ExtractedDocument[];
+  return (await response.json()) as PaginatedResult<ExtractedDocument>;
+}
+
+export async function listAllDocuments(
+  filters?: Record<string, unknown>
+): Promise<ExtractedDocument[]> {
+  const all: ExtractedDocument[] = [];
+  let page = 1;
+  let totalPages = 1;
+
+  while (page <= totalPages) {
+    const result = await listDocuments({ ...filters, page, limit: 100 });
+    all.push(...result.items);
+    totalPages = result.totalPages;
+    page += 1;
+  }
+
+  return all;
 }
 
 export async function getDocument(id: string) {

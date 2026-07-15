@@ -44,18 +44,19 @@ describe("JsonFileRepository.search field queries", () => {
   });
 
   it("filters by nested vendor.name", async () => {
-    const docs = await repo.search({ "vendor.name": "ACME" });
-    expect(docs).toHaveLength(1);
+    const result = await repo.search({ "vendor.name": "ACME" });
+    expect(result.items).toHaveLength(1);
+    expect(result.total).toBe(1);
   });
 
   it("filters total.gt", async () => {
-    const docs = await repo.search({ "total.gt": "50000" });
-    expect(docs).toHaveLength(1);
-    expect(docs[0].extractedData.total).toBe(75000);
+    const result = await repo.search({ "total.gt": "50000" });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].extractedData.total).toBe(75000);
   });
 
   it("filters with free-text q", async () => {
-    const docs = await repo.search({ q: "acme" });
-    expect(docs).toHaveLength(1);
+    const result = await repo.search({ q: "acme" });
+    expect(result.items).toHaveLength(1);
   });
 });

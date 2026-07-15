@@ -37,6 +37,9 @@ data/
 *.sqlite
 *.db
 
+# Tesseract OCR language models (downloaded at runtime by tesseract.js)
+*.traineddata
+
 # Coverage
 coverage/
 .nyc_output/

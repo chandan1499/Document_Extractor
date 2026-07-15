@@ -201,3 +201,18 @@
     grid-template-columns: 1fr;
   }
 }
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border, #e0e0e0);
+}
+
+.pagination-info {
+  color: var(--gray);
+  font-size: 0.9rem;
+}

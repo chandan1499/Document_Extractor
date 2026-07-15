@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: document-extraction-api
+    runtime: node
+    rootDir: server
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: EXTRACT_MODEL
+        value: mixtral-8x7b-32768
+      - key: CLASSIFY_MODEL
+        value: mixtral-8x7b-32768

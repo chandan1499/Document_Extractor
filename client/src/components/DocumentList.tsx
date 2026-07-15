@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { ExtractedDocument } from "../types/index";
-import { listDocuments } from "../services/api";
+import { listDocuments, listAllDocuments } from "../services/api";
 import DocumentModal from "./DocumentModal";
 import Papa from "papaparse";
 import { humanizeLabel } from "../utils/labels";
@@ -10,6 +10,9 @@ type CompareOp = "gt" | "gte" | "lt" | "lte" | "eq" | "";
 
 export default function DocumentList() {
   const [documents, setDocuments] = useState<ExtractedDocument[]>([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
@@ -32,27 +35,37 @@ export default function DocumentList() {
   }, [filter]);
 
   useEffect(() => {
-    loadDocuments();
+    setPage(1);
   }, [typeFilter, debouncedQ, fieldPath, fieldOp, fieldValue]);
+
+  const buildFilters = useCallback((): Record<string, unknown> => {
+    const filters: Record<string, unknown> = { page };
+    if (typeFilter) filters.type = typeFilter;
+    if (debouncedQ.trim()) filters.q = debouncedQ.trim();
+
+    const path = fieldPath.trim();
+    const value = fieldValue.trim();
+    if (path && value) {
+      const key = fieldOp ? `${path}.${fieldOp}` : path;
+      filters[key] = value;
+    }
+
+    return filters;
+  }, [page, typeFilter, debouncedQ, fieldPath, fieldOp, fieldValue]);
+
+  useEffect(() => {
+    loadDocuments();
+  }, [buildFilters]);
 
   const loadDocuments = async () => {
     setLoading(true);
     setError(null);
 
     try {
-      const filters: Record<string, unknown> = {};
-      if (typeFilter) filters.type = typeFilter;
-      if (debouncedQ.trim()) filters.q = debouncedQ.trim();
-
-      const path = fieldPath.trim();
-      const value = fieldValue.trim();
-      if (path && value) {
-        const key = fieldOp ? `${path}.${fieldOp}` : path;
-        filters[key] = value;
-      }
-
-      const docs = await listDocuments(filters);
-      setDocuments(docs);
+      const result = await listDocuments(buildFilters());
+      setDocuments(result.items);
+      setTotal(result.total);
+      setTotalPages(result.totalPages);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load documents");
     } finally {
@@ -70,16 +83,33 @@ export default function DocumentList() {
     setSelectedDocument(null);
   };
 
-  const handleExportJSON = () => {
-    const json = JSON.stringify(documents, null, 2);
+  const getExportFilters = (): Record<string, unknown> => {
+    const filters: Record<string, unknown> = {};
+    if (typeFilter) filters.type = typeFilter;
+    if (debouncedQ.trim()) filters.q = debouncedQ.trim();
+
+    const path = fieldPath.trim();
+    const value = fieldValue.trim();
+    if (path && value) {
+      const key = fieldOp ? `${path}.${fieldOp}` : path;
+      filters[key] = value;
+    }
+
+    return filters;
+  };
+
+  const handleExportJSON = async () => {
+    const allDocs = await listAllDocuments(getExportFilters());
+    const json = JSON.stringify(allDocs, null, 2);
     const blob = new Blob([json], { type: "application/json" });
     downloadFile(blob, "documents.json");
   };
 
-  const handleExportCSV = () => {
-    if (documents.length === 0) return;
+  const handleExportCSV = async () => {
+    const allDocs = await listAllDocuments(getExportFilters());
+    if (allDocs.length === 0) return;
 
-    const flatDocs = documents.map((doc) => ({
+    const flatDocs = allDocs.map((doc) => ({
       ID: doc.id,
       Type: doc.type,
       "Created At": doc.createdAt,
@@ -130,7 +160,7 @@ export default function DocumentList() {
   }
 
   if (
-    documents.length === 0 &&
+    total === 0 &&
     !typeFilter &&
     !debouncedQ &&
     !fieldPath &&
@@ -252,6 +282,28 @@ export default function DocumentList() {
           ))
         )}
       </div>
+
+      {totalPages > 1 && (
+        <div className="pagination-controls">
+          <button
+            className="btn btn-secondary"
+            disabled={page <= 1 || loading}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+          >
+            Previous
+          </button>
+          <span className="pagination-info">
+            Page {page} of {totalPages} ({total} documents)
+          </span>
+          <button
+            className="btn btn-secondary"
+            disabled={page >= totalPages || loading}
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+          >
+            Next
+          </button>
+        </div>
+      )}
 
       <DocumentModal
         document={selectedDocument}

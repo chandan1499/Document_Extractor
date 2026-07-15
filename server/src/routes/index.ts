@@ -155,13 +155,13 @@ export function createRoutes(
 
   /**
    * GET /api/documents
-   * List all saved documents with optional filters
+   * List saved documents with optional filters and pagination
    */
   router.get("/api/documents", async (req: Request, res: Response) => {
     try {
       const filters = req.query;
-      const docs = await docRepo.search(filters);
-      res.json(docs);
+      const result = await docRepo.search(filters);
+      res.json(result);
     } catch (error) {
       logger.error(error, "List documents request failed");
       res.status(500).json({ error: "Failed to fetch documents" });

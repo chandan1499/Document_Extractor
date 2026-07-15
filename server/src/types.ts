@@ -58,12 +58,21 @@ export interface Guideline {
   createdAt: string;
 }
 
+// Pagination
+export interface PaginatedResult<T> {
+  items: T[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
 // Repository
 export interface DocumentRepository {
   save(doc: ExtractedDocument): Promise<ExtractedDocument>;
   findById(id: string): Promise<ExtractedDocument | null>;
   list(): Promise<ExtractedDocument[]>;
-  search(filters: DocumentFilters): Promise<ExtractedDocument[]>;
+  search(filters: DocumentFilters): Promise<PaginatedResult<ExtractedDocument>>;
 }
 
 export interface DocumentFilters {
@@ -72,6 +81,8 @@ export interface DocumentFilters {
   createdBefore?: string;
   /** Free-text search over type, originalText, and extractedData */
   q?: string;
+  page?: number;
+  limit?: number;
   [key: string]: unknown; // Nested paths (vendor.name) and ops (total.gt)
 }
 

@@ -27,7 +27,7 @@ The core challenge is scale — organizations deal with a sea of unstructured do
 - Intelligent data extraction into structured JSON via LLM
 - Two-tier validation: structural (required fields, data types) and semantic (business logic)
 - Human review & editing before saving
-- Save extracted documents with persistent storage
+- Save extracted documents with persistent storage (Supabase Postgres)
 - Search and filter saved documents by type and fields
 - JSON and CSV export
 - Human-in-the-loop learning: corrections are stored and future extractions receive guidance from learned rules
@@ -61,7 +61,7 @@ Ingest → Preprocess → Classify → Extract → Validate → Review → Save
     /registry          DocType → {schema, prompt, validators} mapping
     /pipeline          Extraction pipeline stages (ingest, preprocess, classify, etc.)
     /validation        Structural (Zod) + semantic validators
-    /repository        DocumentRepository + JsonFileRepository
+    /repository        DocumentRepository + PostgresDocumentRepository (+ JsonFileRepository for tests)
     /routes            Express API endpoints
     /config            Logger, env config
     /utils             File extraction utilities (PDF, CSV, OCR, TXT)
@@ -124,12 +124,13 @@ interface DocumentRepository {
   save(doc: ExtractedDocument): Promise<ExtractedDocument>;
   findById(id: string): Promise<ExtractedDocument | null>;
   list(): Promise<ExtractedDocument[]>;
-  search(filters: DocumentFilters): Promise<ExtractedDocument[]>;
+  search(filters: DocumentFilters): Promise<PaginatedResult<ExtractedDocument>>;
 }
 ```
-- Implemented by `JsonFileRepository` (JSON file on disk)
-- Later: `SqliteRepository`, `PostgresRepository` — no app changes needed
-- Search over demo dataset is in-JS filtering
+- Implemented by `PostgresDocumentRepository` (Supabase Postgres)
+- `JsonFileRepository` retained for unit tests only
+- Paginated search: `page` (default 1), `limit` (default 20, max 100)
+- Dynamic nested field filters (`vendor.name`, `total.gt`) applied in-memory when used
 
 #### Correction Store (Human-in-the-loop learning)
 ```typescript
@@ -156,7 +157,8 @@ interface CorrectionRepository {
 - ✅ Structured data extraction to JSON (Groq, strict schemas)
 - ✅ Validation with errors & warnings
 - ✅ Human review & edit before save
-- ✅ Save to persistent JSON file store
+- ✅ Save to Supabase Postgres (survives Render redeploys and sleep cycles)
+- ✅ Paginated document list (`GET /api/documents?page=1&limit=20`)
 - ✅ Search/filter by type, free-text `q`, nested fields, and comparison operators
 - ✅ Export JSON & CSV
 - ✅ Human-in-the-loop learning from corrections
@@ -195,7 +197,7 @@ interface CorrectionRepository {
   - `csv-parse` — CSV parsing
   - `tesseract.js` — Image OCR (optical character recognition)
   - `multer` — File upload handling
-- **Database**: JSON file (swappable via `DocumentRepository` interface)
+- **Database**: Supabase (PostgreSQL) via `pg` driver
 - **Logging**: Pino
 - **Testing**: Vitest + Supertest
 
@@ -211,7 +213,7 @@ interface CorrectionRepository {
 ### Deployment
 - **Frontend**: Netlify (static Vite build)
 - **Backend**: Render (Express API)
-- **Data**: JSON file on persistent disk (Render Disk)
+- **Data**: Supabase Postgres (free tier)
 
 ## AI Model Selection
 
@@ -259,6 +261,7 @@ Try the live app at https://document-extractor-01.netlify.app/ or run locally:
 ### Prerequisites
 - Node.js 18+ (see `client/.nvmrc` for Node 20)
 - Groq API key (free from [console.groq.com](https://console.groq.com))
+- Supabase project (free from [supabase.com](https://supabase.com))
 
 ### Installation
 
@@ -269,10 +272,15 @@ Try the live app at https://document-extractor-01.netlify.app/ or run locally:
    yarn install
    ```
 
-2. **Configure environment**
+2. **Set up Supabase**
+   1. Create a free Supabase project
+   2. Open **SQL Editor** and run `server/db/schema.sql`
+   3. Copy the **Connection string → URI** (use the **Transaction pooler** on port 6543)
+
+3. **Configure environment**
    ```bash
-   cp server/.env.example server/.env
-   # Edit server/.env — set GROQ_API_KEY and model names
+   cp .env.example server/.env
+   # Edit server/.env — set DATABASE_URL, GROQ_API_KEY, and model names
    # Check https://console.groq.com/keys for available models
    ```
 
@@ -303,6 +311,8 @@ Not included in this MVP, but ready to containerize. Suggested:
 ## Future Improvements
 
 ### Recently Completed
+- ✅ Supabase Postgres persistence (documents, corrections, guidelines)
+- ✅ Paginated `GET /api/documents` with `page` and `limit` query params
 - ✅ Netlify frontend + Render backend deployment
 - ✅ Learning tab (view guidelines and correction history)
 - ✅ Field-level query UI (`vendor.name`, `total.gt`, free-text `q`)
@@ -320,7 +330,6 @@ Not included in this MVP, but ready to containerize. Suggested:
 - [ ] Improved error messages and debugging information
 
 ### Medium Term
-- [ ] Swap JSON → SQLite / PostgreSQL (one `Repository` implementation change)
 - [ ] Embedding-based similarity for learned guideline retrieval (more relevant context)
 - [ ] Batch processing (bulk upload multiple documents)
 - [ ] Analytics dashboard (extraction success rate, most common corrections)
@@ -378,25 +387,60 @@ The client reads `VITE_API_URL` (falls back to `/api` for local dev with the Vit
 
 ### Backend (Render)
 
+Configured via [`render.yaml`](render.yaml) or manually:
+
 - **Root directory:** `server`
 - **Build command:** `npm install && npm run build`
 - **Start command:** `npm start`
-- **Env vars:** `GROQ_API_KEY`, `PORT`, `EXTRACT_MODEL`, `CLASSIFY_MODEL`, `DATA_DIR=./data`
+- **Env vars:** `DATABASE_URL`, `GROQ_API_KEY`, `PORT`, `EXTRACT_MODEL`, `CLASSIFY_MODEL`
 
-Enable a persistent disk on Render so `./data/` survives redeploys. On ephemeral filesystems, saved documents and learned guidelines are lost on restart.
+**Supabase setup:**
+1. Create a free Supabase project
+2. Run `server/db/schema.sql` in the Supabase SQL Editor
+3. Copy the pooler connection string → Render `DATABASE_URL`
+4. Redeploy
+
+Migrations also run automatically on server boot. To migrate existing JSON data:
+
+```bash
+cd server && npm run db:import-json
+```
+
+### API: List documents (paginated)
+
+```
+GET /api/documents?page=1&limit=20&type=invoice&q=acme&vendor.name=ACME&total.gt=50000
+```
+
+Response:
+```json
+{
+  "items": [ /* ExtractedDocument[] */ ],
+  "total": 142,
+  "page": 1,
+  "limit": 20,
+  "totalPages": 8
+}
+```
+
+| Param | Default | Max | Description |
+|-------|---------|-----|-------------|
+| `page` | 1 | — | 1-based page index |
+| `limit` | 20 | 100 | Results per page |
+| `type` | — | — | Filter by document type |
+| `q` | — | — | Free-text search |
+| `vendor.name`, `total.gt`, etc. | — | — | Nested field filters |
 
 ## Known Limitations
 
-1. **Storage**: JSON files don't scale to millions of documents. For production, use Postgres/MongoDB with proper indexing.
-2. **Concurrency**: No locking on the JSON file — concurrent writes could corrupt it. Not an issue for a solo demo; add Postgres + transactions for multi-user.
-3. **Groq model availability**: Model names vary by subscription tier. Always check https://console.groq.com/keys for available models and update `.env` accordingly.
-4. **OCR timeout**: Image OCR has a 30-second timeout. Very large or complex images may timeout.
-5. **Groq rate limits**: Free tier caps at 30 RPM (one request every 2 seconds). Fine for a demo, upgrade for production.
-6. **No OAuth**: Anyone with the URL can upload. Add auth (Clerk, Auth0) for production.
-7. **PDF handling**: `pdf-parse` works for text-based PDFs only. Scanned PDFs (image-only) require OCR via image extraction.
-8. **CSV handling**: Converts CSV to formatted text; complex nested structures may not extract optimally.
-9. **Render cold starts**: Free-tier backend sleeps after inactivity; first request may take 30–60 seconds.
-10. **Search is JSON-file backed**: Nested paths (`vendor.name`) and comparisons (`total.gt`) work in-memory over the JSON store, but this is not indexed SQL — fine for demos, not large-scale query workloads.
+1. **Dynamic field filters**: Nested paths (`vendor.name`) and comparisons (`total.gt`) are applied in-memory when used — not indexed SQL. Fine for demo scale.
+2. **Groq model availability**: Model names vary by subscription tier. Always check https://console.groq.com/keys for available models and update `.env` accordingly.
+3. **OCR timeout**: Image OCR has a 30-second timeout. Very large or complex images may timeout.
+4. **Groq rate limits**: Free tier caps at 30 RPM (one request every 2 seconds). Fine for a demo, upgrade for production.
+5. **No OAuth**: Anyone with the URL can upload. Add auth (Clerk, Auth0) for production.
+6. **PDF handling**: `pdf-parse` works for text-based PDFs only. Scanned PDFs (image-only) require OCR via image extraction.
+7. **CSV handling**: Converts CSV to formatted text; complex nested structures may not extract optimally.
+8. **Render cold starts**: Free-tier backend sleeps after inactivity; first request may take 30–60 seconds.
 
 ## README Maintenance
 This README should be updated as features change. Key sections to keep current:

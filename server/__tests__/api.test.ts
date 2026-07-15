@@ -75,8 +75,10 @@ describe("API integration", () => {
     expect(saved.body.id).toBeTruthy();
 
     const list = await request(app).get("/api/documents").expect(200);
-    expect(list.body.length).toBe(1);
-    expect(list.body[0].id).toBe(saved.body.id);
+    expect(list.body.items).toHaveLength(1);
+    expect(list.body.total).toBe(1);
+    expect(list.body.page).toBe(1);
+    expect(list.body.items[0].id).toBe(saved.body.id);
   });
 
   it("GET /api/documents?total.gt=5 filters", async () => {
@@ -92,14 +94,15 @@ describe("API integration", () => {
       .query({ "total.gt": "5" })
       .expect(200);
 
-    expect(filtered.body.length).toBe(1);
+    expect(filtered.body.items).toHaveLength(1);
 
     const empty = await request(app)
       .get("/api/documents")
       .query({ "total.gt": "100" })
       .expect(200);
 
-    expect(empty.body.length).toBe(0);
+    expect(empty.body.items).toHaveLength(0);
+    expect(empty.body.total).toBe(0);
   });
 
   it("POST /api/documents/:id/correct-batch saves corrections and extracts rules", async () => {

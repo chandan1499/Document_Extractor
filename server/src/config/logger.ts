@@ -11,6 +11,7 @@ export const config = {
   extractModel: process.env.EXTRACT_MODEL || "openai/gpt-oss-120b",
   classifyModel: process.env.CLASSIFY_MODEL || "llama-3.1-8b-instant",
   dataDir: process.env.DATA_DIR || "./data",
+  databaseUrl: process.env.DATABASE_URL || "",
   logLevel: process.env.LOG_LEVEL || "info",
 };
 
