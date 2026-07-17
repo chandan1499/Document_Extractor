@@ -14,7 +14,7 @@ A production-quality web application that converts unstructured or semi-structur
 
 Finance and operations teams receive invoices, resumes, and meeting notes as email text, PDFs, and spreadsheets. Manually re-keying that data into systems is slow and error-prone. This app targets that workflow: paste or upload a document, review structured fields, save queryable records, and teach the system from corrections so future extractions improve.
 
-The core challenge is scale — organizations deal with a sea of unstructured documents where manual extraction doesn't hold up. LLMs can intelligently extract structured data, but output needs validation, human review, and a feedback loop to stay accurate over time.
+The core challenge is scale — organizations deal with a sea of unstructured documents where manual extraction doesn't hold up. LLMs can intelligently extract structured data, but output needs validation, **transparent confidence per field**, human review, and a feedback loop to stay accurate over time.
 
 ## Scope & Assumptions
 
@@ -27,6 +27,8 @@ The core challenge is scale — organizations deal with a sea of unstructured do
 - Intelligent data extraction into structured JSON via LLM
 - Two-tier validation: structural (required fields, data types) and semantic (business logic)
 - Human review & editing before saving
+- **Field trust layer**: per-field confidence, source quotes, and alternative candidates for ambiguous extractions
+- **Save confirmation** when low-confidence or validation-flagged fields remain unreviewed
 - Save extracted documents with persistent storage (Supabase Postgres)
 - Search and filter saved documents by type and fields
 - JSON and CSV export
@@ -47,10 +49,12 @@ The core challenge is scale — organizations deal with a sea of unstructured do
 
 ### High-Level Flow
 ```
-Ingest → Preprocess → Classify → Extract → Validate → Review → Save
-                                                ↑
-                                        (Load learned guidelines)
+Ingest → Preprocess → Classify → Extract (+ fieldMeta envelope) → Validate → Align fieldMeta → Review → Save
+                                                                        ↑
+                                                                (Load learned guidelines)
 ```
+
+Extraction returns structured `data` plus per-field **`fieldMeta`** (confidence, source quote, alternatives). Validation issues are merged into field confidence before review. The review UI highlights source text and blocks save behind a confirmation dialog when risky fields remain unreviewed.
 
 ### Directory Structure
 ```
@@ -64,14 +68,16 @@ Ingest → Preprocess → Classify → Extract → Validate → Review → Save
     /repository        DocumentRepository + PostgresDocumentRepository (+ JsonFileRepository for tests)
     /routes            Express API endpoints
     /config            Logger, env config
-    /utils             File extraction utilities (PDF, CSV, OCR, TXT)
+    /utils             File extraction, span location, fieldMeta alignment, validation merge
+  /db                  schema.sql (documents, corrections, guidelines, extraction_schemas)
   /__tests__           Tests (Vitest)
   
 /client
   /src
-    /components        React components (Upload, Review, DocumentList, GuidelinesPanel, DocumentModal)
+    /components        Upload, Review, DocumentList, SchemaManager, DocumentModal, LowConfidenceSaveDialog
     /services          API client
     /types             TypeScript types
+    /utils             Labels, risky-field collection for save confirmation
     /styles            Component-level CSS
   /public              Static assets
   index.html
@@ -83,13 +89,21 @@ Ingest → Preprocess → Classify → Extract → Validate → Review → Save
 #### LLMProvider (Single Responsibility: AI abstraction)
 ```typescript
 interface LLMProvider {
-  classify(text: string): Promise<DocType>;
-  extract<T>(text: string, schema: JsonSchema, prompt: string, guidelines?: Guideline[]): Promise<T>;
+  classify(text: string, types: SchemaTypeInfo[]): Promise<DocType>;
+  extract<T>(
+    text: string,
+    schema: JsonSchema,
+    prompt: string,
+    guidelines?: Guideline[]
+  ): Promise<ExtractResult<T>>;  // { data, fieldMeta?, appliedChanges? }
+  extractLearningRules(...): Promise<string[]>;
+  proposeSchema(...): Promise<FieldDefinition[]>;
 }
 ```
 - Implemented by `GroqProvider` (OpenAI-compatible API)
-- Easy to swap providers: just env vars change
-- Groq's **strict structured outputs** guarantee schema-valid JSON (no retries needed)
+- Every extraction uses a **fieldMeta envelope**: `{ data, fieldMeta }` (+ `appliedChanges` when guidelines apply)
+- Groq **strict structured outputs** guarantee schema-valid JSON
+- Prompt instructs per-leaf confidence, source quotes, alternatives, and format-based low confidence (URLs, email, phone, etc.)
 
 #### Schema Registry (Single source of truth)
 One Zod schema per document type:
@@ -113,10 +127,30 @@ async function extractTextFromFile(
 - Graceful error handling with specific error messages
 
 #### Two-Tier Validation
-1. **Structural** (Zod): required fields, correct types, date/number formats
-2. **Semantic** (custom validators): invoice total = sum of line items, date ranges plausible, etc.
+1. **Structural** (Zod): required fields, correct types, date/number/email formats
+2. **Semantic** (custom validators): invoice total = sum of line items, resume email format, experience date order, etc.
 - Both return typed `ValidationIssue[]`, never throw
+- **`adjustFieldMetaFromValidation`**: merges validation errors/warnings into per-field `fieldMeta` (caps confidence at 0.5 for errors, 0.65 for warnings)
 - Separated for clarity and testability
+
+#### Field Trust Layer (confidence + source grounding)
+Each extraction attaches **`fieldMeta`** — one entry per leaf field:
+
+| Property | Purpose |
+|----------|---------|
+| `field` | Dotted path (e.g. `vendor.name`, `experience.0.company`) |
+| `confidence` | 0–1; LLM-reported, adjusted by validation |
+| `sourceText` | Verbatim quote from the document |
+| `reason` | Why confidence is low (ambiguous values, bad format, validation message) |
+| `alternatives` | Other candidates seen (e.g. two invoices in one PDF) with their source quotes |
+| `start` / `end` | Character offsets in `extractionText` for UI highlighting |
+
+Post-processing utilities:
+- **`alignFieldMeta`**: strips erroneous `data.` path prefix from LLM output; fills metadata for every extracted leaf
+- **`locateSpans`**: maps source quotes to character offsets (exact + whitespace-normalized fuzzy match)
+- Overall document **`confidence`** = average of leaf field confidences
+
+Persisted on `documents` as `field_metadata` (JSONB) and `extraction_text` (TEXT).
 
 #### DocumentRepository (Swappable storage)
 ```typescript
@@ -154,8 +188,10 @@ interface CorrectionRepository {
 - ✅ CSV file parsing with formatted text conversion
 - ✅ Image extraction with OCR (tesseract.js for JPG, PNG, GIF, WebP)
 - ✅ Automatic document type detection
+- ✅ Custom extraction schemas (SchemaManager UI + API)
 - ✅ Structured data extraction to JSON (Groq, strict schemas)
-- ✅ Validation with errors & warnings
+- ✅ **Per-field confidence + source grounding** (`fieldMeta` with alternatives for ambiguous documents)
+- ✅ Validation with errors & warnings merged into field confidence
 - ✅ Human review & edit before save
 - ✅ Save to Supabase Postgres (survives Render redeploys and sleep cycles)
 - ✅ Paginated document list (`GET /api/documents?page=1&limit=20`)
@@ -165,7 +201,13 @@ interface CorrectionRepository {
 - ✅ Learning tab for guidelines and correction history
 - ✅ View complete document details in modal
 
-### UX
+### Review & Trust UX
+- ✅ **Confidence badges** on every field (green / yellow / red by threshold 0.7)
+- ✅ **Low-confidence field highlighting** (orange border + reason tooltip)
+- ✅ **Click-to-source**: select a field to highlight its quote (and alternatives) in the cleaned extraction text
+- ✅ **Candidate switcher** for fields with multiple plausible values (e.g. two invoices in one PDF)
+- ✅ **Save confirmation dialog** when unreviewed risky fields remain (confidence &lt; 0.7 or validation issues; skips fields you already edited)
+- ✅ Click a risky field in the dialog to jump to it in the review panel
 - ✅ Drag & drop upload (advanced feature, collapsible)
 - ✅ Text paste input (primary interface)
 - ✅ Centered loading overlay during extraction
@@ -250,9 +292,9 @@ Alternatives (future):
 Try the live app at https://document-extractor-01.netlify.app/ or run locally:
 
 1. **Upload** — Paste sample invoice text (or use Advanced → upload a PDF/CSV/image).
-2. **Review** — Check extracted fields; fix any wrong values (e.g. vendor name).
+2. **Review** — Check extracted fields; confidence badges flag uncertain values. Click a field to see its source highlighted in the document text. Use the candidate switcher when multiple values were found (e.g. two invoices in one file).
 3. **Learn** — Add an explanation when correcting: *"Vendor is always ACME Cloud, not ACME Cloud Billing"*.
-4. **Save** — Store the document.
+4. **Save** — If low-confidence or validation-flagged fields remain (and you haven't edited them), a confirmation dialog lists them before saving. Choose **Go back and review** or **Save anyway**.
 5. **Query** — Open **Documents**, search with `vendor.name` = `ACME` or `total.gt` = `50000`.
 6. **Learning tab** — See the guideline and correction history from step 3.
 
@@ -274,8 +316,14 @@ Try the live app at https://document-extractor-01.netlify.app/ or run locally:
 
 2. **Set up Supabase**
    1. Create a free Supabase project
-   2. Open **SQL Editor** and run `server/db/schema.sql`
+   2. Open **SQL Editor** and run `server/db/schema.sql` (includes `field_metadata` and `extraction_text` on `documents`)
    3. Copy the **Connection string → URI** (use the **Transaction pooler** on port 6543)
+
+   **Existing databases:** run migrations after pulling new changes:
+   ```bash
+   cd server && npm run db:migrate
+   ```
+   Or re-run the `ALTER TABLE` statements at the bottom of `server/db/schema.sql`.
 
 3. **Configure environment**
    ```bash
@@ -284,7 +332,7 @@ Try the live app at https://document-extractor-01.netlify.app/ or run locally:
    # Check https://console.groq.com/keys for available models
    ```
 
-3. **Run locally**
+4. **Run locally**
    ```bash
    yarn dev
    ```
@@ -298,7 +346,7 @@ Try the live app at https://document-extractor-01.netlify.app/ or run locally:
    cd client && npm run dev   # Terminal 2
    ```
 
-4. **Run tests**
+5. **Run tests**
    ```bash
    cd server && npm test
    ```
@@ -311,23 +359,30 @@ Not included in this MVP, but ready to containerize. Suggested:
 ## Future Improvements
 
 ### Recently Completed
-- ✅ Supabase Postgres persistence (documents, corrections, guidelines)
+- ✅ **Field trust layer**: per-field `fieldMeta` (confidence, sourceText, alternatives, reason) on every extraction
+- ✅ **Source highlighting** in review panel anchored to cleaned `extractionText`
+- ✅ **Validation → confidence merge** (`adjustFieldMetaFromValidation`) for all doc types
+- ✅ **Low-confidence save confirmation dialog** before persisting unreviewed risky fields
+- ✅ **LLM prompt rules** for format failures (incomplete URLs, invalid email, ambiguous multi-document values)
+- ✅ Custom extraction schemas (SchemaManager UI + propose/save API)
+- ✅ Supabase Postgres persistence (`field_metadata`, `extraction_text` columns)
 - ✅ Paginated `GET /api/documents` with `page` and `limit` query params
 - ✅ Netlify frontend + Render backend deployment
 - ✅ Learning tab (view guidelines and correction history)
 - ✅ Field-level query UI (`vendor.name`, `total.gt`, free-text `q`)
 - ✅ Nested field editing in review panel (line items, vendor blocks)
-- ✅ Single-call LLM extraction with `appliedChanges` envelope
-- ✅ API integration tests (22 tests, mocked LLM)
+- ✅ Single-call LLM extraction with `appliedChanges` + `fieldMeta` envelope
+- ✅ API integration tests (mocked LLM; 60+ server tests)
 - ✅ CSV / PDF / image OCR extraction
 - ✅ Modal view, loading overlay, scrollable validation panel
 
 ### Short Term (Next Sprint)
+- [ ] Code-side format validators (URL/phone) as backup when LLM ignores prompt rules
 - [ ] DOCX support (python-docx or similar library on the server)
-- [ ] Per-field confidence scores (ask the LLM to emit `confidence` field)
 - [ ] Edit/delete learned guidelines in the UI
 - [ ] Sample documents in `/samples/` for one-click demo
-- [ ] Improved error messages and debugging information
+- [ ] Confidence badges in document list / read-only modal
+- [ ] Split multi-document uploads into separate records
 
 ### Medium Term
 - [ ] Embedding-based similarity for learned guideline retrieval (more relevant context)
@@ -346,14 +401,16 @@ Not included in this MVP, but ready to containerize. Suggested:
 
 ### Test Coverage
 - Invoice / resume / meeting notes validators
-- Pipeline: preprocess newline handling, validate()
-- API: extract (mocked LLM), save, field-level search
+- Pipeline: preprocess, validate(), fieldMeta alignment, validation merge
+- `locateSpans`, `alignFieldMeta`, `adjustFieldMetaFromValidation`
+- API: extract (mocked LLM), save with `fieldMeta`, field-level search
 - Repository search: nested paths (`vendor.name`), comparison ops (`total.gt`), and free-text `q`
 
 ### Not yet covered
 - GroqProvider live calls
 - File upload / OCR / PDF extraction
 - Full correction→guideline distillation edge cases
+- Frontend `collectRiskyFields` / save dialog unit tests
 
 ### Run Tests
 ```bash
@@ -412,6 +469,8 @@ cd server && npm run db:import-json
 GET /api/documents?page=1&limit=20&type=invoice&q=acme&vendor.name=ACME&total.gt=50000
 ```
 
+Response fields on each document include `fieldMeta`, `extractionText`, and overall `confidence` when available.
+
 Response:
 ```json
 {
@@ -433,14 +492,17 @@ Response:
 
 ## Known Limitations
 
-1. **Dynamic field filters**: Nested paths (`vendor.name`) and comparisons (`total.gt`) are applied in-memory when used — not indexed SQL. Fine for demo scale.
-2. **Groq model availability**: Model names vary by subscription tier. Always check https://console.groq.com/keys for available models and update `.env` accordingly.
-3. **OCR timeout**: Image OCR has a 30-second timeout. Very large or complex images may timeout.
-4. **Groq rate limits**: Free tier caps at 30 RPM (one request every 2 seconds). Fine for a demo, upgrade for production.
-5. **No OAuth**: Anyone with the URL can upload. Add auth (Clerk, Auth0) for production.
-6. **PDF handling**: `pdf-parse` works for text-based PDFs only. Scanned PDFs (image-only) require OCR via image extraction.
-7. **CSV handling**: Converts CSV to formatted text; complex nested structures may not extract optimally.
-8. **Render cold starts**: Free-tier backend sleeps after inactivity; first request may take 30–60 seconds.
+1. **LLM-dependent format checks**: Incomplete URLs (e.g. bare usernames without `https://`) rely on LLM `fieldMeta` confidence unless caught by Zod/semantic validators (email is enforced; generic strings like phone/links are not).
+2. **Stale fieldMeta after edit**: User corrections update `extractedData` but do not recompute `fieldMeta`; save dialog excludes edited fields to avoid false positives.
+3. **Dynamic field filters**: Nested paths (`vendor.name`) and comparisons (`total.gt`) are applied in-memory when used — not indexed SQL. Fine for demo scale.
+4. **Groq model availability**: Model names vary by subscription tier. Always check https://console.groq.com/keys for available models and update `.env` accordingly.
+5. **OCR timeout**: Image OCR has a 30-second timeout. Very large or complex images may timeout.
+6. **Groq rate limits**: Free tier caps at 30 RPM (one request every 2 seconds). Fine for a demo, upgrade for production.
+7. **No OAuth**: Anyone with the URL can upload. Add auth (Clerk, Auth0) for production.
+8. **PDF handling**: `pdf-parse` works for text-based PDFs only. Scanned PDFs (image-only) require OCR via image extraction.
+9. **CSV handling**: Converts CSV to formatted text; complex nested structures may not extract optimally.
+10. **Render cold starts**: Free-tier backend sleeps after inactivity; first request may take 30–60 seconds.
+11. **Multi-document PDFs**: Single upload produces one record; ambiguous fields show alternatives but do not auto-split into separate documents.
 
 ## README Maintenance
 This README should be updated as features change. Key sections to keep current:

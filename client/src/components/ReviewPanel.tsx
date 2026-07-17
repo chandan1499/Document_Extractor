@@ -2,6 +2,11 @@ import { useMemo, useState } from "react";
 import { ExtractedDocument, FieldMeta } from "../types/index";
 import { saveDocument, submitCorrectionsBatch } from "../services/api";
 import { humanizeLabel } from "../utils/labels";
+import {
+  collectRiskyFields,
+  LOW_CONFIDENCE_THRESHOLD,
+} from "../utils/riskyFields";
+import LowConfidenceSaveDialog from "./LowConfidenceSaveDialog";
 import "../styles/ReviewPanel.css";
 
 interface ReviewPanelProps {
@@ -14,8 +19,6 @@ interface FieldEdit {
   original: unknown;
   corrected: unknown;
 }
-
-const LOW_CONFIDENCE_THRESHOLD = 0.7;
 
 interface TextSpan {
   start: number;
@@ -153,6 +156,10 @@ function setByPath(
   return next;
 }
 
+function fieldDomId(fieldPath: string): string {
+  return `field-${fieldPath.replace(/\./g, "-")}`;
+}
+
 export default function ReviewPanel({
   document,
   onSaved,
@@ -174,8 +181,29 @@ export default function ReviewPanel({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const [selectedFieldPath, setSelectedFieldPath] = useState<string | null>(
     null,
+  );
+
+  const editedFieldPaths = useMemo(
+    () => new Set(corrections.keys()),
+    [corrections],
+  );
+  const riskyFields = useMemo(
+    () =>
+      collectRiskyFields({
+        fieldMeta: document.fieldMeta,
+        validationErrors: document.validationErrors,
+        validationWarnings: document.validationWarnings,
+        editedFieldPaths,
+      }),
+    [
+      document.fieldMeta,
+      document.validationErrors,
+      document.validationWarnings,
+      editedFieldPaths,
+    ],
   );
 
   const fieldMetaMap = useMemo(() => {
@@ -271,7 +299,15 @@ export default function ReviewPanel({
     );
   };
 
-  const handleSave = async () => {
+  const handleSaveClick = () => {
+    if (riskyFields.length > 0) {
+      setShowSaveConfirm(true);
+      return;
+    }
+    void performSave();
+  };
+
+  const performSave = async () => {
     setSaving(true);
     setError(null);
 
@@ -305,6 +341,16 @@ export default function ReviewPanel({
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSelectRiskyField = (fieldPath: string) => {
+    setSelectedFieldPath(fieldPath);
+    setShowSaveConfirm(false);
+    requestAnimationFrame(() => {
+      window.document
+        .getElementById(fieldDomId(fieldPath))
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
   };
 
   const renderCandidateSwitcher = (fieldPath: string) => {
@@ -496,6 +542,7 @@ export default function ReviewPanel({
                     ([k, v]) => (
                       <div
                         key={k}
+                        id={fieldDomId(`${fieldPath}.${idx}.${k}`)}
                         className={fieldGroupClass(`${fieldPath}.${idx}.${k}`, "nested")}
                       >
                         {renderFieldLabel(`${fieldPath}.${idx}.${k}`)}
@@ -517,6 +564,7 @@ export default function ReviewPanel({
           {Object.entries(value as Record<string, unknown>).map(([k, v]) => (
             <div
               key={k}
+              id={fieldDomId(`${fieldPath}.${k}`)}
               className={fieldGroupClass(`${fieldPath}.${k}`, "nested")}
             >
               {renderFieldLabel(`${fieldPath}.${k}`)}
@@ -574,6 +622,7 @@ export default function ReviewPanel({
               .map(([field, value]) => (
                 <div
                   key={field}
+                  id={fieldDomId(field)}
                   className={fieldGroupClass(field)}
                 >
                   {renderFieldLabel(field)}
@@ -781,13 +830,25 @@ export default function ReviewPanel({
           Cancel
         </button>
         <button
-          onClick={handleSave}
+          onClick={handleSaveClick}
           className="btn btn-primary"
           disabled={saving}
         >
           {saving ? "Saving..." : "Save Document"}
         </button>
       </div>
+
+      <LowConfidenceSaveDialog
+        isOpen={showSaveConfirm}
+        fields={riskyFields}
+        saving={saving}
+        onCancel={() => setShowSaveConfirm(false)}
+        onConfirm={() => {
+          setShowSaveConfirm(false);
+          void performSave();
+        }}
+        onSelectField={handleSelectRiskyField}
+      />
 
       {hasCorrections && (
         <div className="info-message">
