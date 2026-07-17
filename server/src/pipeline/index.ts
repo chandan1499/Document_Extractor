@@ -5,10 +5,15 @@ import {
   ExtractedDocument,
   Guideline,
   ExtractionChange,
+  SchemaTypeInfo,
 } from "../types.js";
-import { getRegistryEntry } from "../registry/index.js";
-import { schemas } from "../schemas/index.js";
+import { SchemaRegistry } from "../registry/index.js";
+import { buildZodFromFields } from "../schemas/dynamic.js";
 import { logger } from "../config/logger.js";
+
+export interface ExtractDocumentOptions {
+  schemaId?: string;
+}
 
 /**
  * Ingestion: accept raw input in various formats
@@ -43,14 +48,22 @@ export function preprocess(text: string): string {
 }
 
 /**
- * Classification: determine document type
+ * Classification: determine document type among registered schemas
  */
 export async function classify(
   text: string,
-  llmProvider: LLMProvider
+  llmProvider: LLMProvider,
+  types: SchemaTypeInfo[]
 ): Promise<DocType> {
+  if (types.length === 0) {
+    throw new Error("No schemas registered for classification");
+  }
+  if (types.length === 1) {
+    return types[0].id;
+  }
+
   try {
-    const docType = await llmProvider.classify(text);
+    const docType = await llmProvider.classify(text, types);
     logger.info({ docType }, "Document classified");
     return docType;
   } catch (error) {
@@ -62,13 +75,12 @@ export async function classify(
 
 /**
  * Extraction: use LLM to extract structured data (single call).
- * When guidelines are present the provider returns data + appliedChanges
- * in one envelope response.
  */
 export async function extract<T>(
   text: string,
   docType: DocType,
   llmProvider: LLMProvider,
+  schemaRegistry: SchemaRegistry,
   guidelines?: Guideline[]
 ): Promise<{
   data: T;
@@ -76,7 +88,7 @@ export async function extract<T>(
   appliedChanges?: ExtractionChange[];
 }> {
   try {
-    const entry = getRegistryEntry(docType);
+    const entry = schemaRegistry.getEntry(docType);
 
     const { data, appliedChanges } = await llmProvider.extract<T>(
       text,
@@ -102,18 +114,20 @@ export async function extract<T>(
 }
 
 /**
- * Validation: structural (Zod) + semantic (custom validators)
+ * Validation: structural (runtime Zod from field definitions) + semantic validators
  */
 export function validate(
   data: Record<string, unknown>,
-  docType: DocType
+  docType: DocType,
+  schemaRegistry: SchemaRegistry
 ): { errors: ValidationIssue[]; warnings: ValidationIssue[] } {
   const errors: ValidationIssue[] = [];
   const warnings: ValidationIssue[] = [];
 
-  // Structural validation (Zod)
-  const schemaValidator = schemas[docType];
-  if (schemaValidator) {
+  const entry = schemaRegistry.getEntry(docType);
+
+  if (entry.fieldDefinitions && entry.fieldDefinitions.length > 0) {
+    const schemaValidator = buildZodFromFields(entry.fieldDefinitions);
     const result = schemaValidator.safeParse(data);
     if (!result.success) {
       result.error.errors.forEach((err) => {
@@ -126,8 +140,6 @@ export function validate(
     }
   }
 
-  // Semantic validation (custom validators)
-  const entry = getRegistryEntry(docType);
   entry.validators.forEach((validator) => {
     const issues = validator.validate(data, docType);
     issues.forEach((issue) => {
@@ -153,20 +165,31 @@ export function validate(
 export async function extractDocument(
   rawInput: string | Buffer,
   llmProvider: LLMProvider,
+  schemaRegistry: SchemaRegistry,
   guidelines?: Guideline[],
-  guidelineLoader?: (docType: string) => Promise<Guideline[]>
+  guidelineLoader?: (docType: string) => Promise<Guideline[]>,
+  options?: ExtractDocumentOptions
 ): Promise<ExtractedDocument> {
   try {
-    // Ingest
     const ingested = await ingest(rawInput);
-
-    // Preprocess
     const cleaned = preprocess(ingested.text);
 
-    // Classify
-    const docType = await classify(cleaned, llmProvider);
+    let docType: DocType;
 
-    // Load guidelines after classification if loader is provided
+    if (options?.schemaId) {
+      if (!schemaRegistry.has(options.schemaId)) {
+        throw new Error(`Unknown schema: ${options.schemaId}`);
+      }
+      docType = options.schemaId;
+      logger.info({ docType, mode: "explicit" }, "Using explicit schema");
+    } else {
+      docType = await classify(
+        cleaned,
+        llmProvider,
+        schemaRegistry.listTypes()
+      );
+    }
+
     let applicableGuidelines = guidelines || [];
     if (guidelineLoader && (!guidelines || guidelines.length === 0)) {
       try {
@@ -180,20 +203,18 @@ export async function extractDocument(
       }
     }
 
-    // Extract (single LLM call; envelope includes appliedChanges when guidelines exist)
     const { data, appliedChanges } = await extract<Record<string, unknown>>(
       cleaned,
       docType,
       llmProvider,
+      schemaRegistry,
       applicableGuidelines
     );
 
-    // Validate
-    const { errors, warnings } = validate(data, docType);
+    const { errors, warnings } = validate(data, docType, schemaRegistry);
 
-    // Build extracted document
     const doc: ExtractedDocument = {
-      id: "", // Will be assigned on save
+      id: "",
       type: docType,
       originalText: ingested.text,
       extractedData: data,

@@ -3,9 +3,10 @@ import { ExtractedDocument } from "./types/index";
 import UploadArea from "./components/UploadArea";
 import ReviewPanel from "./components/ReviewPanel";
 import DocumentList from "./components/DocumentList";
+import SchemaManager from "./components/SchemaManager";
 import "./App.css";
 
-type AppView = "upload" | "review" | "list";
+type AppView = "upload" | "review" | "list" | "schemas";
 
 export default function App() {
   const [view, setView] = useState<AppView>("upload");
@@ -44,6 +45,12 @@ export default function App() {
           >
             Documents
           </button>
+          <button
+            className={`nav-btn ${view === "schemas" ? "active" : ""}`}
+            onClick={() => setView("schemas")}
+          >
+            Schemas
+          </button>
         </nav>
       </header>
 
@@ -65,6 +72,8 @@ export default function App() {
         )}
 
         {view === "list" && <DocumentList />}
+
+        {view === "schemas" && <SchemaManager />}
       </main>
 
       <footer className="app-footer">

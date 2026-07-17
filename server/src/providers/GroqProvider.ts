@@ -6,6 +6,8 @@ import {
   Guideline,
   ExtractResult,
   CorrectionInput,
+  SchemaTypeInfo,
+  FieldDefinition,
 } from "../types.js";
 import { logger } from "../config/logger.js";
 
@@ -72,31 +74,42 @@ export class GroqProvider implements LLMProvider {
     );
   }
 
-  async classify(text: string): Promise<DocType> {
+  async classify(
+    text: string,
+    types: SchemaTypeInfo[]
+  ): Promise<DocType> {
+    if (types.length === 0) {
+      throw new Error("No document types available for classification");
+    }
+
+    const allowedIds = types.map((t) => t.id);
+    const typeCatalog = types
+      .map(
+        (t) =>
+          `- ${t.id}: ${t.name}${t.description ? ` — ${t.description}` : ""}`
+      )
+      .join("\n");
+
     logger.info(
-      { model: this.classifyModel, textLength: text.length },
+      { model: this.classifyModel, textLength: text.length, typeCount: types.length },
       "🔍 LLM CLASSIFY: Starting document classification"
     );
 
-    const prompt = `Classify this document into one of these types: invoice, resume, meeting_notes.
+    const prompt = `Classify this document into exactly one of these types:
 
-Return a JSON object with a single field "type" containing the classification.
+${typeCatalog}
+
+Return a JSON object with a single field "type" containing the schema id.
 
 Document:
 ${text.slice(0, 2000)}`;
-
-    logger.debug(
-      { prompt: prompt.slice(0, 500) },
-      "📝 LLM CLASSIFY: Input prompt"
-    );
 
     const response = await this.client.chat.completions.create({
       model: this.classifyModel,
       messages: [
         {
           role: "system",
-          content:
-            'You are a document classifier. Respond only with valid JSON in the format {"type": "invoice"|"resume"|"meeting_notes"}',
+          content: `You are a document classifier. Respond only with valid JSON in the format {"type": "<schema_id>"}. Valid ids: ${allowedIds.join(", ")}`,
         },
         { role: "user", content: prompt },
       ],
@@ -108,14 +121,9 @@ ${text.slice(0, 2000)}`;
       const content = response.choices[0].message.content;
       if (!content) throw new Error("Empty response from Groq");
 
-      logger.debug(
-        { rawOutput: content },
-        "📤 LLM CLASSIFY: Raw output from Groq"
-      );
-
       const parsed = JSON.parse(content);
       const type = parsed.type as DocType;
-      if (!["invoice", "resume", "meeting_notes"].includes(type)) {
+      if (!allowedIds.includes(type)) {
         throw new Error(`Invalid document type: ${type}`);
       }
 
@@ -393,5 +401,64 @@ Do not merge unrelated rules into one string.`;
       );
       return [trimmed];
     }
+  }
+
+  async proposeSchema(
+    sampleText: string,
+    hint?: { name?: string; description?: string }
+  ): Promise<FieldDefinition[]> {
+    const nameHint = hint?.name ? `Suggested name: ${hint.name}` : "";
+    const descHint = hint?.description
+      ? `Suggested description: ${hint.description}`
+      : "";
+
+    const prompt = `Analyze this sample document and propose a field list for structured extraction.
+
+${nameHint}
+${descHint}
+
+Return JSON with a "fields" array. Each field must have:
+- key (camelCase string)
+- type: one of string, number, boolean, date, email, array, object
+- required: boolean (default true)
+- label: human-readable name (optional)
+- description: extraction hint (optional)
+- itemType: "string" or "number" when type is array of primitives
+- items: array of field objects when type is array of objects
+- properties: array of field objects when type is object
+
+Sample document:
+${sampleText.slice(0, 4000)}`;
+
+    logger.info(
+      { sampleLength: sampleText.length },
+      "🔍 LLM PROPOSE: Generating schema from sample"
+    );
+
+    const response = await this.client.chat.completions.create({
+      model: this.classifyModel,
+      messages: [
+        {
+          role: "system",
+          content:
+            'You propose extraction schemas from documents. Respond only with valid JSON: {"fields": [...]}',
+        },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0,
+      max_tokens: 2000,
+      response_format: { type: "json_object" },
+    });
+
+    const content = response.choices[0].message.content;
+    if (!content) throw new Error("Empty response from Groq");
+
+    const parsed = JSON.parse(content) as { fields?: FieldDefinition[] };
+    const fields = parsed.fields ?? [];
+    if (fields.length === 0) {
+      throw new Error("LLM did not propose any fields");
+    }
+
+    return fields;
   }
 }

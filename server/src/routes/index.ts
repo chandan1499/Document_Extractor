@@ -5,6 +5,8 @@ import { DocumentRepository } from "../types.js";
 import { CorrectionRepository } from "../types.js";
 import { extractDocument } from "../pipeline/index.js";
 import { extractTextFromFile } from "../utils/fileExtractor.js";
+import { SchemaRegistry } from "../registry/index.js";
+import { createSchemaRoutes } from "./schemas.js";
 import { logger } from "../config/logger.js";
 
 type FileRequest = Request & { file?: Express.Multer.File };
@@ -13,9 +15,12 @@ export function createRoutes(
   docRepo: DocumentRepository,
   correctionRepo: CorrectionRepository,
   llmProvider: LLMProvider,
+  schemaRegistry: SchemaRegistry,
   upload?: Multer
 ): Router {
   const router = Router();
+
+  router.use(createSchemaRoutes(schemaRegistry, llmProvider));
 
   /**
    * POST /api/extract
@@ -23,37 +28,44 @@ export function createRoutes(
    */
   router.post("/api/extract", async (req: Request, res: Response) => {
     try {
-      const { text, docType } = req.body;
+      const { text, docType, schemaId } = req.body;
+      const resolvedSchemaId = schemaId || docType;
 
       if (!text || typeof text !== "string") {
         return res.status(400).json({ error: "Missing or invalid text field" });
       }
 
-      // Optionally pass document type hint to filter relevant guidelines
+      if (resolvedSchemaId && !schemaRegistry.has(resolvedSchemaId)) {
+        return res.status(400).json({ error: `Unknown schema: ${resolvedSchemaId}` });
+      }
+
       let guidelines: Guideline[] = [];
-      if (docType) {
+      if (resolvedSchemaId) {
         guidelines = await correctionRepo.listGuidelines(
-          docType as DocType
+          resolvedSchemaId as DocType
         );
       }
 
-      // Pass guideline loader for auto-loading after classification
       const guidelineLoader = async (detectedDocType: string) =>
         correctionRepo.listGuidelines(detectedDocType as DocType);
 
       const doc = await extractDocument(
         text,
         llmProvider,
+        schemaRegistry,
         guidelines,
-        guidelineLoader
+        guidelineLoader,
+        resolvedSchemaId ? { schemaId: resolvedSchemaId } : undefined
       );
 
       res.json(doc);
     } catch (error) {
       logger.error(error, "Extract request failed");
-      res.status(500).json({
+      const message = error instanceof Error ? error.message : "Unknown error";
+      const status = message.startsWith("Unknown schema:") ? 400 : 500;
+      res.status(status).json({
         error: "Failed to extract document",
-        details: error instanceof Error ? error.message : "Unknown error",
+        details: message,
       });
     }
   });
@@ -72,9 +84,15 @@ export function createRoutes(
             return res.status(400).json({ error: "No file provided" });
           }
 
-          const { docType } = req.body;
+          const { docType, schemaId } = req.body;
+          const resolvedSchemaId = schemaId || docType;
 
-          // Extract text from file based on type
+          if (resolvedSchemaId && !schemaRegistry.has(resolvedSchemaId)) {
+            return res.status(400).json({
+              error: `Unknown schema: ${resolvedSchemaId}`,
+            });
+          }
+
           const text = await extractTextFromFile(
             req.file.buffer,
             req.file.mimetype,
@@ -87,23 +105,23 @@ export function createRoutes(
             });
           }
 
-          // Optionally pass document type hint to filter relevant guidelines
           let guidelines: Guideline[] = [];
-          if (docType) {
+          if (resolvedSchemaId) {
             guidelines = await correctionRepo.listGuidelines(
-              docType as DocType
+              resolvedSchemaId as DocType
             );
           }
 
-          // Pass guideline loader for auto-loading after classification
           const guidelineLoader = async (detectedDocType: string) =>
             correctionRepo.listGuidelines(detectedDocType as DocType);
 
           const doc = await extractDocument(
             text,
             llmProvider,
+            schemaRegistry,
             guidelines,
-            guidelineLoader
+            guidelineLoader,
+            resolvedSchemaId ? { schemaId: resolvedSchemaId } : undefined
           );
 
           res.json(doc);

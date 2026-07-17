@@ -1,5 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import fs from "fs/promises";
+import path from "path";
+import os from "os";
 import { preprocess, validate } from "../src/pipeline/index";
+import { JsonSchemaRepository } from "../src/repository/SchemaRepository";
+import { SchemaRegistry } from "../src/registry/index";
 
 describe("preprocess", () => {
   it("preserves newlines between non-empty lines", () => {
@@ -25,8 +30,21 @@ describe("preprocess", () => {
 });
 
 describe("validate", () => {
+  let dir: string;
+  let schemaRegistry: SchemaRegistry;
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), "doc-pipeline-"));
+    schemaRegistry = new SchemaRegistry(new JsonSchemaRepository(dir));
+    await schemaRegistry.initialize();
+  });
+
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
   it("returns structural errors for missing invoice fields", () => {
-    const { errors } = validate({}, "invoice");
+    const { errors } = validate({}, "invoice", schemaRegistry);
     expect(errors.length).toBeGreaterThan(0);
   });
 
@@ -47,7 +65,8 @@ describe("validate", () => {
         currency: "USD",
         notes: "",
       },
-      "invoice"
+      "invoice",
+      schemaRegistry
     );
     const emailErrors = errors.filter((e) => e.field.includes("email"));
     const dateErrors = errors.filter((e) =>

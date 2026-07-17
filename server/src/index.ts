@@ -4,6 +4,8 @@ import { createApp } from "./app.js";
 import { GroqProvider } from "./providers/GroqProvider.js";
 import { PostgresDocumentRepository } from "./repository/PostgresDocumentRepository.js";
 import { PostgresCorrectionRepository } from "./repository/PostgresCorrectionRepository.js";
+import { PostgresSchemaRepository } from "./repository/SchemaRepository.js";
+import { SchemaRegistry } from "./registry/index.js";
 import { getPool, runMigrations } from "./db/pool.js";
 
 const upload = multer({
@@ -29,11 +31,15 @@ async function main() {
   );
   const docRepository = new PostgresDocumentRepository(pool);
   const correctionStore = new PostgresCorrectionRepository(pool);
+  const schemaRepository = new PostgresSchemaRepository(pool);
+  const schemaRegistry = new SchemaRegistry(schemaRepository);
+  await schemaRegistry.initialize();
 
   const app = createApp({
     docRepo: docRepository,
     correctionRepo: correctionStore,
     llm: llmProvider,
+    schemaRegistry,
     upload,
   });
 

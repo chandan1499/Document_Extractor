@@ -1,4 +1,50 @@
-export type DocType = "invoice" | "resume" | "meeting_notes";
+export const BUILTIN_DOC_TYPES = ["invoice", "resume", "meeting_notes"] as const;
+export type BuiltinDocType = (typeof BUILTIN_DOC_TYPES)[number];
+export type DocType = string;
+
+export type FieldType =
+  | "string"
+  | "number"
+  | "boolean"
+  | "date"
+  | "email"
+  | "array"
+  | "object";
+
+export interface FieldDefinition {
+  key: string;
+  label?: string;
+  type: FieldType;
+  required?: boolean;
+  description?: string;
+  itemType?: "string" | "number";
+  items?: FieldDefinition[];
+  properties?: FieldDefinition[];
+}
+
+export interface ExtractionSchemaSummary {
+  id: string;
+  name: string;
+  description: string;
+  isBuiltin: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExtractionSchema extends ExtractionSchemaSummary {
+  jsonSchema: Record<string, unknown>;
+  prompt: string;
+  fieldDefinitions: FieldDefinition[] | null;
+}
+
+export interface ProposedSchemaDraft {
+  id: string;
+  name: string;
+  description: string;
+  jsonSchema: Record<string, unknown>;
+  prompt: string;
+  fieldDefinitions: FieldDefinition[];
+}
 
 export interface AppliedChange {
   field: string;

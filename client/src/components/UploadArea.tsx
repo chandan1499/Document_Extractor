@@ -1,7 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
-import { ExtractedDocument } from "../types/index";
-import { extractDocument, extractDocumentFromFile } from "../services/api";
+import { ExtractedDocument, ExtractionSchemaSummary } from "../types/index";
+import {
+  extractDocument,
+  extractDocumentFromFile,
+  listSchemas,
+} from "../services/api";
 import "../styles/UploadArea.css";
 
 interface UploadAreaProps {
@@ -17,6 +21,14 @@ export default function UploadArea({
 }: UploadAreaProps) {
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [schemas, setSchemas] = useState<ExtractionSchemaSummary[]>([]);
+  const [schemaId, setSchemaId] = useState("");
+
+  useEffect(() => {
+    listSchemas()
+      .then(setSchemas)
+      .catch(() => setSchemas([]));
+  }, []);
 
   const onDrop = async (acceptedFiles: File[]) => {
     setError(null);
@@ -63,7 +75,10 @@ export default function UploadArea({
     setError(null);
 
     try {
-      const doc = await extractDocument(inputText);
+      const doc = await extractDocument(
+        inputText,
+        schemaId || undefined
+      );
       onDocumentExtracted(doc);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Extraction failed");
@@ -77,7 +92,10 @@ export default function UploadArea({
     setError(null);
 
     try {
-      const doc = await extractDocumentFromFile(file);
+      const doc = await extractDocumentFromFile(
+        file,
+        schemaId || undefined
+      );
       onDocumentExtracted(doc);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Extraction failed");
@@ -89,6 +107,24 @@ export default function UploadArea({
   return (
     <div className={`upload-area ${loading ? "loading-active" : ""}`}>
       <h2>Extract Data from Documents</h2>
+
+      <div className="schema-select-row">
+        <label htmlFor="schema-select">Document type</label>
+        <select
+          id="schema-select"
+          value={schemaId}
+          onChange={(e) => setSchemaId(e.target.value)}
+          disabled={loading}
+          className="schema-select"
+        >
+          <option value="">Auto-detect type</option>
+          {schemas.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+      </div>
 
       <div className="upload-container">
         <div className="upload-panel text-panel">

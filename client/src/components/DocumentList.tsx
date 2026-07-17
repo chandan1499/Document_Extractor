@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { ExtractedDocument } from "../types/index";
-import { listDocuments, listAllDocuments } from "../services/api";
+import { ExtractedDocument, ExtractionSchemaSummary } from "../types/index";
+import { listDocuments, listAllDocuments, listSchemas } from "../services/api";
 import DocumentModal from "./DocumentModal";
 import Papa from "papaparse";
 import { humanizeLabel } from "../utils/labels";
@@ -24,7 +24,18 @@ export default function DocumentList() {
   const [selectedDocument, setSelectedDocument] =
     useState<ExtractedDocument | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [schemaOptions, setSchemaOptions] = useState<ExtractionSchemaSummary[]>(
+    []
+  );
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const schemaName = (id: string) =>
+    schemaOptions.find((s) => s.id === id)?.name ?? id;
+
+  useEffect(() => {
+    listSchemas()
+      .then(setSchemaOptions)
+      .catch(() => setSchemaOptions([]));
+  }, []);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -194,9 +205,11 @@ export default function DocumentList() {
           className="type-filter"
         >
           <option value="">All Types</option>
-          <option value="invoice">Invoice</option>
-          <option value="resume">Resume</option>
-          <option value="meeting_notes">Meeting Notes</option>
+          {schemaOptions.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
         </select>
 
         <button onClick={handleExportJSON} className="btn btn-secondary">
@@ -256,7 +269,7 @@ export default function DocumentList() {
               }}
             >
               <div className="card-header">
-                <h3>{doc.type.toUpperCase()}</h3>
+                <h3>{schemaName(doc.type)}</h3>
                 <span className="doc-id">{doc.id.slice(0, 8)}...</span>
               </div>
 

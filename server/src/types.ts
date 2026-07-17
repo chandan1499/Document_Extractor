@@ -1,5 +1,66 @@
 // Document types
-export type DocType = "invoice" | "resume" | "meeting_notes";
+export const BUILTIN_DOC_TYPES = ["invoice", "resume", "meeting_notes"] as const;
+export type BuiltinDocType = (typeof BUILTIN_DOC_TYPES)[number];
+export type DocType = string;
+
+export type FieldType =
+  | "string"
+  | "number"
+  | "boolean"
+  | "date"
+  | "email"
+  | "array"
+  | "object";
+
+export interface FieldDefinition {
+  key: string;
+  label?: string;
+  type: FieldType;
+  required?: boolean;
+  description?: string;
+  /** Primitive type for arrays of strings/numbers */
+  itemType?: "string" | "number";
+  /** Schema for array items when type is array of objects */
+  items?: FieldDefinition[];
+  /** Nested object properties when type is object */
+  properties?: FieldDefinition[];
+}
+
+export interface ExtractionSchema {
+  id: string;
+  name: string;
+  description: string;
+  jsonSchema: Record<string, unknown>;
+  prompt: string;
+  fieldDefinitions: FieldDefinition[] | null;
+  isBuiltin: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SchemaTypeInfo {
+  id: string;
+  name: string;
+  description: string;
+  isBuiltin: boolean;
+}
+
+export interface ProposedSchemaDraft {
+  id: string;
+  name: string;
+  description: string;
+  jsonSchema: Record<string, unknown>;
+  prompt: string;
+  fieldDefinitions: FieldDefinition[];
+}
+
+export interface SchemaRepository {
+  list(): Promise<ExtractionSchema[]>;
+  findById(id: string): Promise<ExtractionSchema | null>;
+  save(schema: ExtractionSchema): Promise<ExtractionSchema>;
+  delete(id: string): Promise<boolean>;
+  upsertIfMissing(schema: ExtractionSchema): Promise<void>;
+}
 
 // Applied guideline change
 export interface AppliedChange {
@@ -115,7 +176,10 @@ export interface CorrectionInput {
 
 // LLM Provider
 export interface LLMProvider {
-  classify(text: string): Promise<DocType>;
+  classify(
+    text: string,
+    types: SchemaTypeInfo[]
+  ): Promise<DocType>;
   extract<T>(
     text: string,
     schema: Record<string, unknown>,
@@ -128,4 +192,8 @@ export interface LLMProvider {
     corrections: CorrectionInput[],
     learningNotes: string
   ): Promise<string[]>;
+  proposeSchema(
+    sampleText: string,
+    hint?: { name?: string; description?: string }
+  ): Promise<FieldDefinition[]>;
 }

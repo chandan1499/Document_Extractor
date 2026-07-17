@@ -42,3 +42,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_guidelines_dedup
   ON guidelines (doc_type, COALESCE(scope_key, ''), lower(rule));
 
 CREATE INDEX IF NOT EXISTS idx_guidelines_doc_type ON guidelines (doc_type);
+
+CREATE TABLE IF NOT EXISTS extraction_schemas (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  json_schema JSONB NOT NULL,
+  prompt TEXT NOT NULL,
+  field_definitions JSONB,
+  is_builtin BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);

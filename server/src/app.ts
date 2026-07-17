@@ -7,6 +7,7 @@ import {
   CorrectionRepository,
   LLMProvider,
 } from "./types.js";
+import { SchemaRegistry } from "./registry/index.js";
 import { logger } from "./config/logger.js";
 import { config } from "./config/logger.js";
 
@@ -14,6 +15,7 @@ export interface AppDeps {
   docRepo: DocumentRepository;
   correctionRepo: CorrectionRepository;
   llm: LLMProvider;
+  schemaRegistry: SchemaRegistry;
   upload?: Multer;
 }
 
@@ -25,7 +27,13 @@ export function createApp(deps: AppDeps): Express {
   app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
   app.use(
-    createRoutes(deps.docRepo, deps.correctionRepo, deps.llm, deps.upload)
+    createRoutes(
+      deps.docRepo,
+      deps.correctionRepo,
+      deps.llm,
+      deps.schemaRegistry,
+      deps.upload
+    )
   );
 
   app.use(

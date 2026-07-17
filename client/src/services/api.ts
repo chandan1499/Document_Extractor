@@ -1,16 +1,29 @@
-import { ExtractedDocument, Guideline, PaginatedResult } from "../types/index";
+import {
+  ExtractedDocument,
+  ExtractionSchema,
+  ExtractionSchemaSummary,
+  FieldDefinition,
+  Guideline,
+  PaginatedResult,
+  ProposedSchemaDraft,
+} from "../types/index";
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/$/, "");
 
-export async function extractDocument(text: string, docType?: string) {
+export async function extractDocument(text: string, schemaId?: string) {
   const response = await fetch(`${API_BASE}/extract`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, docType }),
+    body: JSON.stringify({ text, schemaId }),
   });
 
   if (!response.ok) {
-    throw new Error("Failed to extract document");
+    const err = await response.json().catch(() => ({}));
+    throw new Error(
+      (err as { details?: string; error?: string }).details ||
+        (err as { error?: string }).error ||
+        "Failed to extract document"
+    );
   }
 
   return (await response.json()) as ExtractedDocument;
@@ -18,12 +31,12 @@ export async function extractDocument(text: string, docType?: string) {
 
 export async function extractDocumentFromFile(
   file: File,
-  docType?: string
+  schemaId?: string
 ) {
   const formData = new FormData();
   formData.append("file", file);
-  if (docType) {
-    formData.append("docType", docType);
+  if (schemaId) {
+    formData.append("schemaId", schemaId);
   }
 
   const response = await fetch(`${API_BASE}/extract-file`, {
@@ -37,18 +50,14 @@ export async function extractDocumentFromFile(
       throw new Error(
         error.details || error.error || "Failed to extract document from file"
       );
-    } catch (parseError) {
+    } catch {
       throw new Error(
         `Server error (${response.status}): ${response.statusText}`
       );
     }
   }
 
-  try {
-    return (await response.json()) as ExtractedDocument;
-  } catch (parseError) {
-    throw new Error("Invalid response from server");
-  }
+  return (await response.json()) as ExtractedDocument;
 }
 
 export async function saveDocument(doc: ExtractedDocument) {
@@ -188,4 +197,74 @@ export async function listCorrections(docType?: string) {
   }
 
   return await response.json();
+}
+
+export async function listSchemas(): Promise<ExtractionSchemaSummary[]> {
+  const response = await fetch(`${API_BASE}/schemas`);
+  if (!response.ok) {
+    throw new Error("Failed to fetch schemas");
+  }
+  return (await response.json()) as ExtractionSchemaSummary[];
+}
+
+export async function getSchema(id: string): Promise<ExtractionSchema> {
+  const response = await fetch(`${API_BASE}/schemas/${id}`);
+  if (!response.ok) {
+    throw new Error("Failed to fetch schema");
+  }
+  return (await response.json()) as ExtractionSchema;
+}
+
+export async function saveSchema(payload: {
+  id?: string;
+  name: string;
+  description?: string;
+  fieldDefinitions: FieldDefinition[];
+  prompt?: string;
+}): Promise<ExtractionSchema> {
+  const response = await fetch(`${API_BASE}/schemas`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(
+      (err as { error?: string }).error || "Failed to save schema"
+    );
+  }
+  return (await response.json()) as ExtractionSchema;
+}
+
+export async function deleteSchema(id: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/schemas/${id}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(
+      (err as { error?: string }).error || "Failed to delete schema"
+    );
+  }
+}
+
+export async function proposeSchema(payload: {
+  sampleText: string;
+  name?: string;
+  description?: string;
+}): Promise<ProposedSchemaDraft> {
+  const response = await fetch(`${API_BASE}/schemas/propose`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(
+      (err as { details?: string; error?: string }).details ||
+        (err as { error?: string }).error ||
+        "Failed to propose schema"
+    );
+  }
+  return (await response.json()) as ProposedSchemaDraft;
 }

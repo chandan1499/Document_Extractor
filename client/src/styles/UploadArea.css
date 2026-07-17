@@ -10,9 +10,31 @@
 }
 
 .upload-area h2 {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
   color: var(--dark);
   flex-shrink: 0;
+}
+
+.schema-select-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  flex-shrink: 0;
+}
+
+.schema-select-row label {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.schema-select {
+  flex: 1;
+  max-width: 320px;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
 }
 
 .upload-container {
