@@ -30,8 +30,9 @@ export class PostgresDocumentRepository implements DocumentRepository {
     await this.pool.query(
       `INSERT INTO documents (
         id, type, original_text, extracted_data, applied_changes,
-        validation_errors, validation_warnings, confidence, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        validation_errors, validation_warnings, confidence,
+        field_metadata, extraction_text, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       ON CONFLICT (id) DO UPDATE SET
         type = EXCLUDED.type,
         original_text = EXCLUDED.original_text,
@@ -40,6 +41,8 @@ export class PostgresDocumentRepository implements DocumentRepository {
         validation_errors = EXCLUDED.validation_errors,
         validation_warnings = EXCLUDED.validation_warnings,
         confidence = EXCLUDED.confidence,
+        field_metadata = EXCLUDED.field_metadata,
+        extraction_text = EXCLUDED.extraction_text,
         updated_at = EXCLUDED.updated_at`,
       [
         doc.id,
@@ -50,6 +53,8 @@ export class PostgresDocumentRepository implements DocumentRepository {
         JSON.stringify(doc.validationErrors),
         JSON.stringify(doc.validationWarnings),
         doc.confidence ?? null,
+        doc.fieldMeta ? JSON.stringify(doc.fieldMeta) : null,
+        doc.extractionText ?? null,
         doc.createdAt,
         doc.updatedAt,
       ]

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { ExtractedDocument } from "../types/index";
+import { useMemo, useState } from "react";
+import { ExtractedDocument, FieldMeta } from "../types/index";
 import { saveDocument, submitCorrectionsBatch } from "../services/api";
 import { humanizeLabel } from "../utils/labels";
 import "../styles/ReviewPanel.css";
@@ -13,6 +13,72 @@ interface ReviewPanelProps {
 interface FieldEdit {
   original: unknown;
   corrected: unknown;
+}
+
+const LOW_CONFIDENCE_THRESHOLD = 0.7;
+
+interface TextSpan {
+  start: number;
+  end: number;
+  kind: "chosen" | "alternative";
+}
+
+function buildHighlightSpans(meta: FieldMeta): TextSpan[] {
+  const spans: TextSpan[] = [];
+  if (meta.start != null && meta.end != null && meta.end > meta.start) {
+    spans.push({ start: meta.start, end: meta.end, kind: "chosen" });
+  }
+  for (const alt of meta.alternatives ?? []) {
+    if (alt.start != null && alt.end != null && alt.end > alt.start) {
+      spans.push({ start: alt.start, end: alt.end, kind: "alternative" });
+    }
+  }
+  return spans.sort((a, b) => a.start - b.start);
+}
+
+function HighlightedText({
+  text,
+  meta,
+}: {
+  text: string;
+  meta: FieldMeta | undefined;
+}) {
+  if (!meta) return <>{text}</>;
+
+  const spans = buildHighlightSpans(meta);
+  if (spans.length === 0) return <>{text}</>;
+
+  const parts: JSX.Element[] = [];
+  let cursor = 0;
+
+  spans.forEach((span, i) => {
+    if (span.start > cursor) {
+      parts.push(<span key={`t-${i}`}>{text.slice(cursor, span.start)}</span>);
+    }
+    parts.push(
+      <mark
+        key={`m-${i}`}
+        className={
+          span.kind === "chosen" ? "source-chosen" : "source-alternative"
+        }
+      >
+        {text.slice(span.start, span.end)}
+      </mark>,
+    );
+    cursor = span.end;
+  });
+
+  if (cursor < text.length) {
+    parts.push(<span key="tail">{text.slice(cursor)}</span>);
+  }
+
+  return <>{parts}</>;
+}
+
+function confidenceBadgeClass(confidence: number): string {
+  if (confidence < LOW_CONFIDENCE_THRESHOLD) return "low";
+  if (confidence >= 0.9) return "high";
+  return "medium";
 }
 
 function getByPath(obj: unknown, path: string): unknown {
@@ -108,6 +174,22 @@ export default function ReviewPanel({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedFieldPath, setSelectedFieldPath] = useState<string | null>(
+    null,
+  );
+
+  const fieldMetaMap = useMemo(() => {
+    const map = new Map<string, FieldMeta>();
+    for (const meta of document.fieldMeta ?? []) {
+      const key = meta.field.replace(/^data\./, "");
+      const existing = map.get(key);
+      if (!existing || meta.confidence < existing.confidence) {
+        map.set(key, { ...meta, field: key });
+      }
+    }
+    return map;
+  }, [document.fieldMeta]);
+  const anchorText = document.extractionText ?? document.originalText;
 
   const valuesEqual = (a: unknown, b: unknown) =>
     JSON.stringify(a) === JSON.stringify(b);
@@ -198,6 +280,9 @@ export default function ReviewPanel({
         ...document,
         extractedData: editedData,
         appliedChanges: appliedChanges.length > 0 ? appliedChanges : undefined,
+        fieldMeta: document.fieldMeta,
+        extractionText: document.extractionText,
+        confidence: document.confidence,
       };
 
       const saved = await saveDocument(docToSave);
@@ -220,6 +305,118 @@ export default function ReviewPanel({
     } finally {
       setSaving(false);
     }
+  };
+
+  const renderCandidateSwitcher = (fieldPath: string) => {
+    const meta = fieldMetaMap.get(fieldPath);
+    if (
+      !meta ||
+      meta.confidence >= LOW_CONFIDENCE_THRESHOLD ||
+      !meta.alternatives?.length
+    ) {
+      return null;
+    }
+
+    const currentValue = getByPath(editedData, fieldPath);
+    const candidates = [
+      { label: "Chosen", value: currentValue },
+      ...meta.alternatives.map((alt, i) => ({
+        label: `Alt ${i + 1}`,
+        value: alt.value,
+      })),
+    ];
+
+    return (
+      <div className="candidate-switcher">
+        <span className="candidate-switcher-label">
+          {candidates.length} candidates —{" "}
+          {meta.reason || "multiple values found in document"}
+        </span>
+        <div className="candidate-buttons">
+          {candidates.map((c, i) => (
+            <button
+              key={i}
+              type="button"
+              className={`btn-small candidate-btn ${
+                valuesEqual(currentValue, c.value) ? "active" : ""
+              }`}
+              onClick={() => {
+                handleFieldChange(fieldPath, c.value);
+                setSelectedFieldPath(fieldPath);
+              }}
+            >
+              {typeof c.value === "object"
+                ? JSON.stringify(c.value)
+                : String(c.value)}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderFieldLabel = (fieldPath: string) => {
+    const meta = fieldMetaMap.get(fieldPath);
+    const validationMessage = getFieldValidationMessage(fieldPath);
+    const leaf = fieldPath.split(".").pop() ?? fieldPath;
+    const displayConfidence =
+      meta?.confidence ??
+      (validationMessage ? LOW_CONFIDENCE_THRESHOLD - 0.01 : undefined) ??
+      (document.fieldMeta?.length ? 0.85 : undefined);
+
+    return (
+      <div
+        className="field-label-row"
+        onClick={() => setSelectedFieldPath(fieldPath)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setSelectedFieldPath(fieldPath);
+          }
+        }}
+        role="button"
+        tabIndex={0}
+      >
+        <label>{humanizeLabel(leaf)}</label>
+        {displayConfidence != null && (
+          <span
+            className={`confidence-badge ${confidenceBadgeClass(displayConfidence)}`}
+            title={
+              meta?.reason ||
+              validationMessage ||
+              `Confidence: ${(displayConfidence * 100).toFixed(0)}%`
+            }
+          >
+            {(displayConfidence * 100).toFixed(0)}%
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  const fieldGroupClass = (fieldPath: string, extra = "") => {
+    const meta = fieldMetaMap.get(fieldPath);
+    const hasValidationIssue =
+      document.validationErrors.some((i) => i.field === fieldPath) ||
+      document.validationWarnings.some((i) => i.field === fieldPath);
+    const classes = ["field-group", extra].filter(Boolean);
+    if (
+      (meta && meta.confidence < LOW_CONFIDENCE_THRESHOLD) ||
+      hasValidationIssue
+    ) {
+      classes.push("low-confidence");
+    }
+    if (selectedFieldPath === fieldPath) {
+      classes.push("selected-field");
+    }
+    return classes.join(" ");
+  };
+
+  const getFieldValidationMessage = (fieldPath: string): string | undefined => {
+    const issue =
+      document.validationErrors.find((i) => i.field === fieldPath) ??
+      document.validationWarnings.find((i) => i.field === fieldPath);
+    return issue?.message;
   };
 
   const renderScalar = (fieldPath: string, value: unknown): JSX.Element => {
@@ -297,9 +494,13 @@ export default function ReviewPanel({
               {item !== null && typeof item === "object" && !Array.isArray(item)
                 ? Object.entries(item as Record<string, unknown>).map(
                     ([k, v]) => (
-                      <div key={k} className="field-group nested">
-                        <label>{humanizeLabel(k)}</label>
+                      <div
+                        key={k}
+                        className={fieldGroupClass(`${fieldPath}.${idx}.${k}`, "nested")}
+                      >
+                        {renderFieldLabel(`${fieldPath}.${idx}.${k}`)}
                         {renderField(`${fieldPath}.${idx}.${k}`, v)}
+                        {renderCandidateSwitcher(`${fieldPath}.${idx}.${k}`)}
                       </div>
                     ),
                   )
@@ -314,16 +515,25 @@ export default function ReviewPanel({
       return (
         <div className="nested-object">
           {Object.entries(value as Record<string, unknown>).map(([k, v]) => (
-            <div key={k} className="field-group nested">
-              <label>{humanizeLabel(k)}</label>
+            <div
+              key={k}
+              className={fieldGroupClass(`${fieldPath}.${k}`, "nested")}
+            >
+              {renderFieldLabel(`${fieldPath}.${k}`)}
               {renderField(`${fieldPath}.${k}`, v)}
+              {renderCandidateSwitcher(`${fieldPath}.${k}`)}
             </div>
           ))}
         </div>
       );
     }
 
-    return renderScalar(fieldPath, value);
+    return (
+      <>
+        {renderScalar(fieldPath, value)}
+        {renderCandidateSwitcher(fieldPath)}
+      </>
+    );
   };
 
   const hasErrors = document.validationErrors.length > 0;
@@ -340,10 +550,19 @@ export default function ReviewPanel({
             Original Document
             <span className="char-count">
               {" "}
-              ({document.originalText.length.toLocaleString()} chars)
+              ({anchorText.length.toLocaleString()} chars)
             </span>
           </h3>
-          <div className="text-content">{document.originalText}</div>
+          <div className="text-content">
+            <HighlightedText
+              text={anchorText}
+              meta={
+                selectedFieldPath
+                  ? fieldMetaMap.get(selectedFieldPath)
+                  : undefined
+              }
+            />
+          </div>
         </div>
 
         <div className="panel extracted-data">
@@ -353,8 +572,11 @@ export default function ReviewPanel({
             {Object.entries(editedData)
               .filter(([field]) => !field.includes("."))
               .map(([field, value]) => (
-                <div key={field} className="field-group">
-                  <label>{humanizeLabel(field)}</label>
+                <div
+                  key={field}
+                  className={fieldGroupClass(field)}
+                >
+                  {renderFieldLabel(field)}
                   {renderField(field, value)}
                 </div>
               ))}

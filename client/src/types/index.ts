@@ -55,6 +55,23 @@ export interface AppliedChange {
   accepted?: boolean;
 }
 
+export interface FieldCandidate {
+  value: unknown;
+  sourceText: string;
+  start?: number;
+  end?: number;
+}
+
+export interface FieldMeta {
+  field: string;
+  confidence: number;
+  sourceText: string;
+  reason?: string;
+  alternatives?: FieldCandidate[];
+  start?: number;
+  end?: number;
+}
+
 export interface ExtractedDocument {
   id: string;
   type: DocType;
@@ -64,6 +81,8 @@ export interface ExtractedDocument {
   validationErrors: ValidationIssue[];
   validationWarnings: ValidationIssue[];
   confidence?: number;
+  fieldMeta?: FieldMeta[];
+  extractionText?: string;
   createdAt: string;
   updatedAt: string;
 }

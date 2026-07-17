@@ -15,6 +15,9 @@ CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents (created_at DES
 CREATE INDEX IF NOT EXISTS idx_documents_type ON documents (type);
 CREATE INDEX IF NOT EXISTS idx_documents_extracted_data ON documents USING GIN (extracted_data);
 
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS field_metadata JSONB;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS extraction_text TEXT;
+
 CREATE TABLE IF NOT EXISTS corrections (
   id UUID PRIMARY KEY,
   doc_type TEXT NOT NULL,

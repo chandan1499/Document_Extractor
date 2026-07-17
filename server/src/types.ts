@@ -62,6 +62,25 @@ export interface SchemaRepository {
   upsertIfMissing(schema: ExtractionSchema): Promise<void>;
 }
 
+/** Alternative value the model saw but did not choose */
+export interface FieldCandidate {
+  value: unknown;
+  sourceText: string;
+  start?: number;
+  end?: number;
+}
+
+/** Per-field confidence and source grounding from extraction */
+export interface FieldMeta {
+  field: string;
+  confidence: number;
+  sourceText: string;
+  reason?: string;
+  alternatives?: FieldCandidate[];
+  start?: number;
+  end?: number;
+}
+
 // Applied guideline change
 export interface AppliedChange {
   field: string;
@@ -82,6 +101,8 @@ export interface ExtractedDocument {
   validationErrors: ValidationIssue[];
   validationWarnings: ValidationIssue[];
   confidence?: number;
+  fieldMeta?: FieldMeta[];
+  extractionText?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -166,6 +187,7 @@ export interface ExtractionChange {
 export interface ExtractResult<T> {
   data: T;
   appliedChanges?: ExtractionChange[];
+  fieldMeta?: FieldMeta[];
 }
 
 export interface CorrectionInput {

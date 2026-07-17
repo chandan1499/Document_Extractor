@@ -8,44 +8,152 @@ import {
   CorrectionInput,
   SchemaTypeInfo,
   FieldDefinition,
+  FieldMeta,
 } from "../types.js";
 import { logger } from "../config/logger.js";
 
-function wrapSchemaWithChanges(
-  dataSchema: Record<string, unknown>
-): Record<string, unknown> {
-  // originalValue/correctedValue are JSON strings so Groq strict schema accepts any shape
-  return {
-    type: "object",
-    properties: {
-      data: dataSchema,
-      appliedChanges: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            field: { type: "string" },
-            originalValue: {
-              type: "string",
-              description:
-                "JSON-encoded value as it appeared on the document before rules",
-            },
-            correctedValue: {
-              type: "string",
-              description:
-                "JSON-encoded value after applying the matching rule",
-            },
-            rule: { type: "string" },
+function normalizeFieldPath(field: string): string {
+  return field.replace(/^data\./, "");
+}
+
+const FIELD_META_ITEM_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    field: {
+      type: "string",
+      description:
+        'Dotted path to the leaf field (e.g. "vendor.name", "lineItems.0.total")',
+    },
+    confidence: {
+      type: "number",
+      description: "0-1 confidence in the chosen value",
+    },
+    sourceText: {
+      type: "string",
+      description: "Verbatim quote from the document for the chosen value",
+    },
+    reason: {
+      type: "string",
+      description:
+        "Short explanation when confidence is low; empty string when confident",
+    },
+    alternatives: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          value: {
+            type: "string",
+            description: "JSON-encoded alternative value seen in the document",
           },
-          required: ["field", "originalValue", "correctedValue", "rule"],
-          additionalProperties: false,
+          sourceText: {
+            type: "string",
+            description: "Verbatim quote for this alternative",
+          },
         },
+        required: ["value", "sourceText"],
+        additionalProperties: false,
       },
     },
-    required: ["data", "appliedChanges"],
+  },
+  required: ["field", "confidence", "sourceText", "reason", "alternatives"],
+  additionalProperties: false,
+};
+
+function wrapExtractionEnvelope(
+  dataSchema: Record<string, unknown>,
+  options: { includeAppliedChanges: boolean }
+): Record<string, unknown> {
+  const properties: Record<string, unknown> = {
+    data: dataSchema,
+    fieldMeta: {
+      type: "array",
+      items: FIELD_META_ITEM_SCHEMA,
+    },
+  };
+  const required = ["data", "fieldMeta"];
+
+  if (options.includeAppliedChanges) {
+    properties.appliedChanges = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          field: { type: "string" },
+          originalValue: {
+            type: "string",
+            description:
+              "JSON-encoded value as it appeared on the document before rules",
+          },
+          correctedValue: {
+            type: "string",
+            description:
+              "JSON-encoded value after applying the matching rule",
+          },
+          rule: { type: "string" },
+        },
+        required: ["field", "originalValue", "correctedValue", "rule"],
+        additionalProperties: false,
+      },
+    };
+    required.push("appliedChanges");
+  }
+
+  return {
+    type: "object",
+    properties,
+    required,
     additionalProperties: false,
   };
 }
+
+const FIELD_META_PROMPT = `
+FIELD METADATA (required for every leaf field in "data"):
+Return a "fieldMeta" array with one entry per leaf field you extracted.
+Each entry must include:
+- "field": dotted path to the leaf (e.g. "vendor.name", "lineItems.0.total")
+- "confidence": number 0-1 for how sure you are about the chosen value
+- "sourceText": exact verbatim quote from the document supporting the chosen value
+- "reason": short explanation when confidence is low; use "" when confident
+- "alternatives": array of other plausible values you saw but did not choose
+  Each alternative: { "value": "<JSON-encoded value>", "sourceText": "<verbatim quote>" }
+
+Rules for fieldMeta:
+- Include EVERY leaf field from "data" (scalars, nested object leaves, array item leaves).
+- "field" paths must use schema root keys only (e.g. "name", "email", "experience.0.company").
+  Do NOT prefix paths with "data.".
+- When the document contains multiple documents or duplicate values (e.g. two invoices in one PDF),
+  lower confidence and list the other candidates in "alternatives" with their source quotes.
+- "value" in alternatives MUST be JSON-encoded strings (same as appliedChanges values).
+- If no alternatives exist, return "alternatives": [].
+- "sourceText" must be copied verbatim from the document text provided.
+
+CONFIDENCE SCORING RULES (apply when writing fieldMeta):
+
+A) URL / link fields (any field path containing "link", "url", "website", "github", or "linkedin"):
+   - A valid value MUST look like a URL: starts with "http://" or "https://", OR is clearly a full domain (e.g. linkedin.com/in/..., github.com/username).
+   - If the document only shows a bare username, handle, or fragment WITHOUT scheme or domain (e.g. "chandan", "@chandan", "linkedin/chandan" with no host):
+     * Still extract what appears on the document into "data".
+     * In fieldMeta for that field: confidence MUST be <= 0.5 (use 0.3–0.5).
+     * "reason" MUST state the value is not a complete URL (missing http/https or domain).
+   - Do NOT assign confidence above 0.7 to non-URL link values.
+   - Empty string for optional links: confidence may be high if truly absent from document.
+
+B) Phone fields (field path contains "phone", "mobile", or "tel"):
+   - Count digits only (ignore spaces, dashes, parentheses).
+   - If digit count is clearly wrong when a phone is present (e.g. fewer than 10 or more than 15):
+     * confidence MUST be <= 0.5
+     * "reason" MUST mention invalid or incomplete phone format.
+
+C) Email fields:
+   - If value is not a valid email shape (missing @, domain, etc.): confidence MUST be <= 0.5.
+
+D) General confidence bands:
+   - 0.9+ ONLY when the value clearly matches the field type and is unambiguous on the document.
+   - 0.7–0.89 when plausible but not fully verified.
+   - <= 0.5 when format is wrong, value is incomplete, or you had to guess.
+   - Use confidence below 0.7 whenever unsure OR when any rule in A–C applies.
+   - "reason" must be non-empty whenever confidence <= 0.7.`;
 
 function parseJsonValue(raw: unknown): unknown {
   if (typeof raw !== "string") return raw;
@@ -54,6 +162,57 @@ function parseJsonValue(raw: unknown): unknown {
   } catch {
     return raw;
   }
+}
+
+function parseFieldMeta(raw: unknown): FieldMeta[] {
+  if (!Array.isArray(raw)) return [];
+
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const entry = item as Record<string, unknown>;
+      const field = entry.field;
+      const confidence = entry.confidence;
+      const sourceText = entry.sourceText;
+
+      if (typeof field !== "string" || typeof sourceText !== "string") {
+        return null;
+      }
+
+      const confNum =
+        typeof confidence === "number"
+          ? Math.min(1, Math.max(0, confidence))
+          : 0.5;
+
+      const reason =
+        typeof entry.reason === "string" && entry.reason.trim()
+          ? entry.reason.trim()
+          : undefined;
+
+      const alternatives = Array.isArray(entry.alternatives)
+        ? entry.alternatives
+            .map((alt) => {
+              if (!alt || typeof alt !== "object") return null;
+              const a = alt as Record<string, unknown>;
+              if (typeof a.sourceText !== "string") return null;
+              return {
+                value: parseJsonValue(a.value),
+                sourceText: a.sourceText,
+              };
+            })
+            .filter((a): a is NonNullable<typeof a> => a !== null)
+        : [];
+
+      const meta: FieldMeta = {
+        field: normalizeFieldPath(field),
+        confidence: confNum,
+        sourceText,
+        ...(reason ? { reason } : {}),
+        ...(alternatives.length > 0 ? { alternatives } : {}),
+      };
+      return meta;
+    })
+    .filter((m): m is FieldMeta => m !== null);
 }
 
 export class GroqProvider implements LLMProvider {
@@ -160,9 +319,11 @@ ${text.slice(0, 2000)}`;
       "🔍 LLM EXTRACT: Starting data extraction"
     );
 
-    let systemPrompt = prompt;
+    let systemPrompt = prompt + FIELD_META_PROMPT;
     const guidelinesApplied: string[] = [];
-    let responseSchema = schema;
+    const responseSchema = wrapExtractionEnvelope(schema, {
+      includeAppliedChanges: hasGuidelines,
+    });
 
     if (hasGuidelines && guidelines) {
       logger.info(
@@ -177,8 +338,6 @@ ${text.slice(0, 2000)}`;
 
       guidelinesApplied.push(...guidelines.slice(0, 10).map((g) => g.rule));
 
-      responseSchema = wrapSchemaWithChanges(schema);
-
       systemPrompt += `
 
 ⚠️ IMPORTANT - LEARNED CORRECTIONS FROM PREVIOUS EXTRACTIONS:
@@ -188,9 +347,10 @@ ${rulesText}
 These are vendor-provided rules and aliases that have been verified. Apply them without exception.
 
 RESPONSE FORMAT (required):
-Return a JSON object with exactly two keys:
+Return a JSON object with:
 1. "data" — the final extracted document fields AFTER applying the rules above.
-2. "appliedChanges" — an array of ONLY the fields that changed because of a rule.
+2. "fieldMeta" — metadata for every leaf field (see FIELD METADATA above).
+3. "appliedChanges" — an array of ONLY the fields that changed because of a rule.
    Each entry must be:
    {
      "field": "<top-level field name that changed>",
@@ -214,6 +374,13 @@ Rules for appliedChanges:
         { appliedRules: guidelinesApplied },
         "📝 LLM EXTRACT: Guidelines rules being applied"
       );
+    } else {
+      systemPrompt += `
+
+RESPONSE FORMAT (required):
+Return a JSON object with:
+1. "data" — the extracted document fields matching the schema.
+2. "fieldMeta" — metadata for every leaf field (see FIELD METADATA above).`;
     }
 
     logger.debug(
@@ -238,7 +405,7 @@ Rules for appliedChanges:
         },
       ],
       temperature: 0,
-      max_tokens: hasGuidelines ? 3000 : 2000,
+      max_tokens: 3500,
       response_format: {
         type: "json_schema",
         json_schema: {
@@ -258,20 +425,22 @@ Rules for appliedChanges:
         "📤 LLM EXTRACT: Raw output from Groq (first 500 chars)"
       );
 
-      const parsed = JSON.parse(content);
+      const parsed = JSON.parse(content) as {
+        data: T;
+        fieldMeta?: unknown;
+        appliedChanges?: Array<{
+          field: string;
+          originalValue: unknown;
+          correctedValue: unknown;
+          rule: string;
+        }>;
+      };
 
+      const fieldMeta = parseFieldMeta(parsed.fieldMeta);
+
+      let appliedChanges: ExtractResult<T>["appliedChanges"];
       if (hasGuidelines) {
-        const envelope = parsed as {
-          data: T;
-          appliedChanges?: Array<{
-            field: string;
-            originalValue: unknown;
-            correctedValue: unknown;
-            rule: string;
-          }>;
-        };
-
-        const appliedChanges = (envelope.appliedChanges || [])
+        appliedChanges = (parsed.appliedChanges || [])
           .map((c) => ({
             field: c.field,
             originalValue: parseJsonValue(c.originalValue),
@@ -284,32 +453,28 @@ Rules for appliedChanges:
               JSON.stringify(c.correctedValue)
           );
 
-        logger.info(
-          {
-            extractedFields: Object.keys(
-              (envelope.data || {}) as Record<string, unknown>
-            ),
-            changesReported: appliedChanges.length,
-          },
-          "✅ LLM EXTRACT: Envelope extraction completed successfully"
-        );
-
-        return {
-          data: envelope.data,
-          appliedChanges:
-            appliedChanges.length > 0 ? appliedChanges : undefined,
-        };
+        if (appliedChanges.length === 0) {
+          appliedChanges = undefined;
+        }
       }
 
       logger.info(
         {
-          extractedFields: Object.keys(parsed as Record<string, unknown>),
-          guidelinesUsed: false,
+          extractedFields: Object.keys(
+            (parsed.data || {}) as Record<string, unknown>
+          ),
+          fieldMetaCount: fieldMeta.length,
+          changesReported: appliedChanges?.length || 0,
+          guidelinesUsed: hasGuidelines,
         },
-        "✅ LLM EXTRACT: Data extraction completed successfully"
+        "✅ LLM EXTRACT: Envelope extraction completed successfully"
       );
 
-      return { data: parsed as T };
+      return {
+        data: parsed.data,
+        fieldMeta: fieldMeta.length > 0 ? fieldMeta : undefined,
+        appliedChanges,
+      };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       logger.error(

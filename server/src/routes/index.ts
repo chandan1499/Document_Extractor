@@ -142,7 +142,7 @@ export function createRoutes(
    */
   router.post("/api/documents", async (req: Request, res: Response) => {
     try {
-      const { type, originalText, extractedData, validationErrors, appliedChanges } =
+      const { type, originalText, extractedData, validationErrors, appliedChanges, fieldMeta, extractionText, confidence } =
         req.body;
 
       if (!type || !extractedData) {
@@ -155,10 +155,13 @@ export function createRoutes(
         id: "",
         type: type as DocType,
         originalText,
+        extractionText,
         extractedData,
         appliedChanges,
+        fieldMeta,
         validationErrors: validationErrors || [],
         validationWarnings: [],
+        confidence,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };

@@ -76,6 +76,32 @@ describe("API integration", () => {
 
     expect(res.body.type).toBe("invoice");
     expect(res.body.extractedData.invoiceNumber).toBe("INV-1");
+    expect(res.body.extractionText).toBeDefined();
+  });
+
+  it("POST /api/documents persists fieldMeta and confidence", async () => {
+    const res = await request(app)
+      .post("/api/documents")
+      .send({
+        type: "invoice",
+        originalText: "raw",
+        extractionText: "cleaned",
+        extractedData: mockInvoiceData,
+        validationErrors: [],
+        confidence: 0.85,
+        fieldMeta: [
+          {
+            field: "vendor.name",
+            confidence: 0.5,
+            sourceText: "ACME",
+          },
+        ],
+      })
+      .expect(201);
+
+    expect(res.body.confidence).toBe(0.85);
+    expect(res.body.fieldMeta).toHaveLength(1);
+    expect(res.body.extractionText).toBe("cleaned");
   });
 
   it("POST /api/extract with schemaId skips classification", async () => {

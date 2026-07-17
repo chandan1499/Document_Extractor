@@ -3,6 +3,7 @@ import {
   Correction,
   DocType,
   ExtractedDocument,
+  FieldMeta,
   Guideline,
   ValidationIssue,
 } from "../types.js";
@@ -16,6 +17,8 @@ export interface DocumentRow {
   validation_errors: ValidationIssue[];
   validation_warnings: ValidationIssue[];
   confidence: number | null;
+  field_metadata: FieldMeta[] | null;
+  extraction_text: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -51,6 +54,8 @@ export function rowToDocument(row: DocumentRow): ExtractedDocument {
     validationErrors: row.validation_errors ?? [],
     validationWarnings: row.validation_warnings ?? [],
     confidence: row.confidence ?? undefined,
+    fieldMeta: row.field_metadata ?? undefined,
+    extractionText: row.extraction_text ?? undefined,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };

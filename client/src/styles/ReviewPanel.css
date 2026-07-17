@@ -496,3 +496,107 @@
     width: 100%;
   }
 }
+
+/* Field confidence + source grounding */
+.field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  cursor: pointer;
+}
+
+.field-label-row label {
+  margin-bottom: 0;
+}
+
+.confidence-badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.confidence-badge.high {
+  background: #d4edda;
+  color: #155724;
+}
+
+.confidence-badge.medium {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.confidence-badge.low {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.field-group.low-confidence {
+  background: #fff8f0;
+  border: 1px solid #f0ad4e;
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+
+.field-group.selected-field {
+  box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.25);
+}
+
+.text-content mark.source-chosen {
+  background: #ffe082;
+  color: inherit;
+  padding: 0.1em 0;
+  border-radius: 2px;
+}
+
+.text-content mark.source-alternative {
+  background: #b3e5fc;
+  color: inherit;
+  padding: 0.1em 0;
+  border-radius: 2px;
+}
+
+.candidate-switcher {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: #fff8f0;
+  border: 1px dashed #f0ad4e;
+  border-radius: 4px;
+}
+
+.candidate-switcher-label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--gray);
+  margin-bottom: 0.5rem;
+  line-height: 1.4;
+}
+
+.candidate-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.candidate-btn {
+  background: white;
+  color: var(--dark);
+  border: 1px solid var(--border);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidate-btn.active {
+  background: #0066cc;
+  color: white;
+  border-color: #0066cc;
+}
+
+.candidate-btn:hover:not(.active) {
+  background: var(--light);
+}

@@ -6,10 +6,17 @@ import {
   Guideline,
   ExtractionChange,
   SchemaTypeInfo,
+  FieldMeta,
 } from "../types.js";
 import { SchemaRegistry } from "../registry/index.js";
 import { buildZodFromFields } from "../schemas/dynamic.js";
 import { logger } from "../config/logger.js";
+import { averageConfidence, locateFieldMeta } from "../utils/locateSpans.js";
+import { adjustFieldMetaFromValidation } from "../utils/adjustFieldMeta.js";
+import {
+  ensureFieldMetaCoverage,
+  normalizeFieldMeta,
+} from "../utils/alignFieldMeta.js";
 
 export interface ExtractDocumentOptions {
   schemaId?: string;
@@ -86,11 +93,12 @@ export async function extract<T>(
   data: T;
   rawResponse: string;
   appliedChanges?: ExtractionChange[];
+  fieldMeta?: FieldMeta[];
 }> {
   try {
     const entry = schemaRegistry.getEntry(docType);
 
-    const { data, appliedChanges } = await llmProvider.extract<T>(
+    const { data, appliedChanges, fieldMeta } = await llmProvider.extract<T>(
       text,
       entry.schema,
       entry.prompt,
@@ -98,13 +106,18 @@ export async function extract<T>(
     );
 
     logger.info(
-      { docType, changesApplied: appliedChanges?.length || 0 },
+      {
+        docType,
+        changesApplied: appliedChanges?.length || 0,
+        fieldMetaCount: fieldMeta?.length || 0,
+      },
       "Data extracted"
     );
     return {
       data,
       rawResponse: JSON.stringify(data),
       appliedChanges,
+      fieldMeta,
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
@@ -203,7 +216,8 @@ export async function extractDocument(
       }
     }
 
-    const { data, appliedChanges } = await extract<Record<string, unknown>>(
+    const { data, appliedChanges, fieldMeta: rawFieldMeta } =
+      await extract<Record<string, unknown>>(
       cleaned,
       docType,
       llmProvider,
@@ -213,11 +227,28 @@ export async function extractDocument(
 
     const { errors, warnings } = validate(data, docType, schemaRegistry);
 
+    const alignedMeta = ensureFieldMetaCoverage(
+      data,
+      normalizeFieldMeta(rawFieldMeta ?? [])
+    );
+    const adjustedMeta = adjustFieldMetaFromValidation(
+      alignedMeta,
+      errors,
+      warnings,
+      data
+    );
+    const fieldMeta =
+      adjustedMeta.length > 0 ? locateFieldMeta(cleaned, adjustedMeta) : undefined;
+    const confidence = fieldMeta ? averageConfidence(fieldMeta) : undefined;
+
     const doc: ExtractedDocument = {
       id: "",
       type: docType,
       originalText: ingested.text,
+      extractionText: cleaned,
       extractedData: data,
+      fieldMeta,
+      confidence,
       appliedChanges: appliedChanges
         ? appliedChanges.map((change) => ({
             field: change.field,

@@ -37,7 +37,11 @@ Focus on:
 - Education (school, degree, graduation date)
 - Skills
 
-For links.linkedin and links.github, prefer full URLs when present (e.g. https://linkedin.com/in/..., https://github.com/...).
+For links.linkedin and links.github:
+- Extract exactly what appears on the resume into "data".
+- If the text is NOT a full URL (does not start with http:// or https:// and is not a full linkedin.com/github.com URL), treat it as an INCOMPLETE link in fieldMeta: confidence <= 0.5 and reason explaining missing URL scheme or domain.
+- Examples that MUST get low confidence in fieldMeta: "chandan", "@chandan", "github/chandan" without https://github.com/...
+- Only use high confidence (>= 0.9) in fieldMeta when the value is a complete URL.
 Use empty strings for missing optional text fields. Return valid JSON matching the provided schema.`;
 
 const MEETING_NOTES_PROMPT = `You are a meeting notes extractor. Extract:
