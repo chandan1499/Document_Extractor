@@ -19,8 +19,16 @@ interface CorrectionsFile {
 
 async function main() {
   const dataDir = process.env.DATA_DIR || "./data";
+  const importUserId = process.env.IMPORT_USER_ID;
   const documentsPath = path.join(dataDir, "documents.json");
   const correctionsPath = path.join(dataDir, "corrections.json");
+
+  if (!importUserId) {
+    console.error(
+      "IMPORT_USER_ID is required. Set it to the Supabase auth user UUID that should own imported rows."
+    );
+    process.exit(1);
+  }
 
   await runMigrations();
   const pool = getPool();
@@ -31,7 +39,7 @@ async function main() {
     const docsContent = await fs.readFile(documentsPath, "utf-8");
     const docsData = JSON.parse(docsContent) as DocumentsFile;
     for (const doc of docsData.documents) {
-      await docRepo.save(doc);
+      await docRepo.save(doc, importUserId);
     }
     console.log(`Imported ${docsData.documents.length} documents`);
   } catch (err) {
@@ -46,10 +54,10 @@ async function main() {
     const corrContent = await fs.readFile(correctionsPath, "utf-8");
     const corrData = JSON.parse(corrContent) as CorrectionsFile;
     for (const correction of corrData.corrections) {
-      await corrRepo.saveCorrection(correction);
+      await corrRepo.saveCorrection(correction, importUserId);
     }
     for (const guideline of corrData.guidelines) {
-      await corrRepo.saveGuideline(guideline);
+      await corrRepo.saveGuideline(guideline, importUserId);
     }
     console.log(
       `Imported ${corrData.corrections.length} corrections and ${corrData.guidelines.length} guidelines`

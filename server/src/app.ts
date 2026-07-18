@@ -10,6 +10,7 @@ import {
 import { SchemaRegistry } from "./registry/index.js";
 import { logger } from "./config/logger.js";
 import { config } from "./config/logger.js";
+import { requireAuth } from "./middleware/auth.js";
 
 export interface AppDeps {
   docRepo: DocumentRepository;
@@ -17,14 +18,36 @@ export interface AppDeps {
   llm: LLMProvider;
   schemaRegistry: SchemaRegistry;
   upload?: Multer;
+  /** When set, skips JWT verification and injects this user (tests only). */
+  testUserId?: string;
 }
 
 export function createApp(deps: AppDeps): Express {
   const app = express();
 
-  app.use(cors());
+  app.use(
+    cors({
+      exposedHeaders: ["Authorization"],
+    })
+  );
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ limit: "10mb", extended: true }));
+
+  app.get("/api/health", (_req, res) => {
+    res.json({ status: "ok" });
+  });
+
+  if (deps.testUserId) {
+    app.use((req, _res, next) => {
+      req.user = {
+        id: deps.testUserId!,
+        email: `${deps.testUserId}@test.local`,
+      };
+      next();
+    });
+  } else {
+    app.use(requireAuth);
+  }
 
   app.use(
     createRoutes(

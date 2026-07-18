@@ -12,6 +12,10 @@ services:
         sync: false
       - key: GROQ_API_KEY
         sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
       - key: EXTRACT_MODEL
         value: mixtral-8x7b-32768
       - key: CLASSIFY_MODEL

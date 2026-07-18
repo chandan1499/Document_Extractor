@@ -12,6 +12,8 @@ export const config = {
   classifyModel: process.env.CLASSIFY_MODEL || "llama-3.1-8b-instant",
   dataDir: process.env.DATA_DIR || "./data",
   databaseUrl: process.env.DATABASE_URL || "",
+  supabaseUrl: process.env.SUPABASE_URL || "",
+  supabaseJwtSecret: process.env.SUPABASE_JWT_SECRET || "",
   logLevel: process.env.LOG_LEVEL || "info",
 };
 

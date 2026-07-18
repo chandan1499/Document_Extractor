@@ -19,20 +19,28 @@ import { DocumentRow, rowToDocument } from "./rowMappers.js";
 export class PostgresDocumentRepository implements DocumentRepository {
   constructor(private pool: pg.Pool) {}
 
-  async save(doc: ExtractedDocument): Promise<ExtractedDocument> {
+  async save(doc: ExtractedDocument, userId: string): Promise<ExtractedDocument> {
     const isNew = !doc.id;
     if (isNew) {
       doc.id = uuidv4();
       doc.createdAt = new Date().toISOString();
     }
     doc.updatedAt = new Date().toISOString();
+    doc.userId = userId;
+
+    if (!isNew) {
+      const existing = await this.findById(doc.id, userId);
+      if (!existing) {
+        throw new Error("Document not accessible");
+      }
+    }
 
     await this.pool.query(
       `INSERT INTO documents (
         id, type, original_text, extracted_data, applied_changes,
         validation_errors, validation_warnings, confidence,
-        field_metadata, extraction_text, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        field_metadata, extraction_text, user_id, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       ON CONFLICT (id) DO UPDATE SET
         type = EXCLUDED.type,
         original_text = EXCLUDED.original_text,
@@ -55,6 +63,7 @@ export class PostgresDocumentRepository implements DocumentRepository {
         doc.confidence ?? null,
         doc.fieldMeta ? JSON.stringify(doc.fieldMeta) : null,
         doc.extractionText ?? null,
+        userId,
         doc.createdAt,
         doc.updatedAt,
       ]
@@ -63,29 +72,31 @@ export class PostgresDocumentRepository implements DocumentRepository {
     return doc;
   }
 
-  async findById(id: string): Promise<ExtractedDocument | null> {
+  async findById(id: string, userId: string): Promise<ExtractedDocument | null> {
     const result = await this.pool.query<DocumentRow>(
-      "SELECT * FROM documents WHERE id = $1",
-      [id]
+      "SELECT * FROM documents WHERE id = $1 AND user_id = $2",
+      [id, userId]
     );
     if (result.rows.length === 0) return null;
     return rowToDocument(result.rows[0]);
   }
 
-  async list(): Promise<ExtractedDocument[]> {
+  async list(userId: string): Promise<ExtractedDocument[]> {
     const result = await this.pool.query<DocumentRow>(
-      "SELECT * FROM documents ORDER BY created_at DESC"
+      "SELECT * FROM documents WHERE user_id = $1 ORDER BY created_at DESC",
+      [userId]
     );
     return result.rows.map(rowToDocument);
   }
 
   async search(
-    filters: DocumentFilters
+    filters: DocumentFilters,
+    userId: string
   ): Promise<PaginatedResult<ExtractedDocument>> {
     const { page, limit } = parsePagination(filters);
 
     if (hasDynamicFilters(filters)) {
-      const { clauses, params } = this.buildSqlClauses(filters);
+      const { clauses, params } = this.buildSqlClauses(filters, userId);
       const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
       const result = await this.pool.query<DocumentRow>(
         `SELECT * FROM documents ${where} ORDER BY created_at DESC`,
@@ -101,7 +112,7 @@ export class PostgresDocumentRepository implements DocumentRepository {
       return buildPaginatedResult(items, total, page, limit);
     }
 
-    const { clauses, params } = this.buildSqlClauses(filters);
+    const { clauses, params } = this.buildSqlClauses(filters, userId);
     const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
 
     const countResult = await this.pool.query<{ count: string }>(
@@ -127,12 +138,16 @@ export class PostgresDocumentRepository implements DocumentRepository {
     );
   }
 
-  private buildSqlClauses(filters: DocumentFilters): {
+  private buildSqlClauses(
+    filters: DocumentFilters,
+    userId: string
+  ): {
     clauses: string[];
     params: unknown[];
   } {
     const clauses: string[] = [];
-    const params: unknown[] = [];
+    const params: unknown[] = [userId];
+    clauses.push(`user_id = $1`);
 
     if (filters.type) {
       params.push(filters.type);

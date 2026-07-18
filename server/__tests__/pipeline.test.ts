@@ -7,6 +7,8 @@ import { JsonSchemaRepository } from "../src/repository/SchemaRepository";
 import { SchemaRegistry } from "../src/registry/index";
 import type { LLMProvider, SchemaTypeInfo } from "../src/types";
 
+const TEST_USER_ID = "00000000-0000-4000-8000-000000000001";
+
 describe("preprocess", () => {
   it("preserves newlines between non-empty lines", () => {
     const input = "Line one\n\nLine two\n  Line three  ";
@@ -44,13 +46,13 @@ describe("validate", () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
-  it("returns structural errors for missing invoice fields", () => {
-    const { errors } = validate({}, "invoice", schemaRegistry);
+  it("returns structural errors for missing invoice fields", async () => {
+    const { errors } = await validate({}, "invoice", schemaRegistry, TEST_USER_ID);
     expect(errors.length).toBeGreaterThan(0);
   });
 
-  it("accepts empty vendor email and ISO datetime invoiceDate", () => {
-    const { errors } = validate(
+  it("accepts empty vendor email and ISO datetime invoiceDate", async () => {
+    const { errors } = await validate(
       {
         invoiceNumber: "INV-1",
         invoiceDate: "2025-01-01T00:00:00Z",
@@ -67,7 +69,8 @@ describe("validate", () => {
         notes: "",
       },
       "invoice",
-      schemaRegistry
+      schemaRegistry,
+      TEST_USER_ID
     );
     const emailErrors = errors.filter((e) => e.field.includes("email"));
     const dateErrors = errors.filter((e) =>
@@ -136,6 +139,7 @@ describe("extractDocument fieldMeta", () => {
       text,
       mockLlm,
       schemaRegistry,
+      TEST_USER_ID,
       [],
       undefined,
       { schemaId: "invoice" }
@@ -195,6 +199,7 @@ describe("extractDocument fieldMeta", () => {
       text,
       mockLlm,
       schemaRegistry,
+      TEST_USER_ID,
       [],
       undefined,
       { schemaId: "resume" }

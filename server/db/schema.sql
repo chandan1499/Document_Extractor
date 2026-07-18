@@ -57,3 +57,13 @@ CREATE TABLE IF NOT EXISTS extraction_schemas (
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
 );
+
+ALTER TABLE extraction_schemas ADD COLUMN IF NOT EXISTS user_id UUID;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS user_id UUID;
+ALTER TABLE corrections ADD COLUMN IF NOT EXISTS user_id UUID;
+ALTER TABLE guidelines ADD COLUMN IF NOT EXISTS user_id UUID;
+
+CREATE INDEX IF NOT EXISTS idx_extraction_schemas_user_id ON extraction_schemas (user_id);
+CREATE INDEX IF NOT EXISTS idx_documents_user_id ON documents (user_id);
+CREATE INDEX IF NOT EXISTS idx_corrections_user_id ON corrections (user_id);
+CREATE INDEX IF NOT EXISTS idx_guidelines_user_id ON guidelines (user_id);

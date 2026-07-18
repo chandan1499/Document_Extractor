@@ -19,6 +19,7 @@ export interface DocumentRow {
   confidence: number | null;
   field_metadata: FieldMeta[] | null;
   extraction_text: string | null;
+  user_id: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -32,6 +33,7 @@ export interface CorrectionRow {
   context_snippet: string | null;
   scope_key: string | null;
   user_explanation: string | null;
+  user_id: string | null;
   created_at: Date;
 }
 
@@ -41,6 +43,7 @@ export interface GuidelineRow {
   scope_key: string | null;
   rule: string;
   source_correction_ids: string[];
+  user_id: string | null;
   created_at: Date;
 }
 
@@ -56,6 +59,7 @@ export function rowToDocument(row: DocumentRow): ExtractedDocument {
     confidence: row.confidence ?? undefined,
     fieldMeta: row.field_metadata ?? undefined,
     extractionText: row.extraction_text ?? undefined,
+    userId: row.user_id ?? undefined,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -71,6 +75,7 @@ export function rowToCorrection(row: CorrectionRow): Correction {
     contextSnippet: row.context_snippet ?? undefined,
     scopeKey: row.scope_key ?? undefined,
     userExplanation: row.user_explanation ?? undefined,
+    userId: row.user_id ?? undefined,
     createdAt: row.created_at.toISOString(),
   };
 }
@@ -82,6 +87,7 @@ export function rowToGuideline(row: GuidelineRow): Guideline {
     scopeKey: row.scope_key ?? undefined,
     rule: row.rule,
     sourceCorrectionIds: row.source_correction_ids ?? [],
+    userId: row.user_id ?? undefined,
     createdAt: row.created_at.toISOString(),
   };
 }

@@ -10,6 +10,9 @@ import { JsonSchemaRepository } from "../src/repository/SchemaRepository";
 import { SchemaRegistry } from "../src/registry/index";
 import type { LLMProvider, SchemaTypeInfo } from "../src/types";
 
+const USER_A = "00000000-0000-4000-8000-000000000001";
+const USER_B = "00000000-0000-4000-8000-000000000002";
+
 const mockInvoiceData = {
   invoiceNumber: "INV-1",
   invoiceDate: "2025-01-01",
@@ -41,6 +44,20 @@ const mockLlm: LLMProvider = {
   ],
 };
 
+function createTestApp(dir: string, testUserId: string) {
+  const schemaRegistry = new SchemaRegistry(new JsonSchemaRepository(dir));
+  return {
+    schemaRegistry,
+    app: createApp({
+      docRepo: new JsonFileRepository(dir),
+      correctionRepo: new JsonCorrectionStore(dir),
+      llm: mockLlm,
+      schemaRegistry,
+      testUserId,
+    }),
+  };
+}
+
 describe("API integration", () => {
   let dir: string;
   let app: ReturnType<typeof createApp>;
@@ -48,18 +65,29 @@ describe("API integration", () => {
 
   beforeEach(async () => {
     dir = await fs.mkdtemp(path.join(os.tmpdir(), "doc-api-"));
-    schemaRegistry = new SchemaRegistry(new JsonSchemaRepository(dir));
+    const setup = createTestApp(dir, USER_A);
+    schemaRegistry = setup.schemaRegistry;
     await schemaRegistry.initialize();
-    app = createApp({
+    app = setup.app;
+  });
+
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it("returns 401 for protected routes without auth", async () => {
+    const unauthApp = createApp({
       docRepo: new JsonFileRepository(dir),
       correctionRepo: new JsonCorrectionStore(dir),
       llm: mockLlm,
       schemaRegistry,
     });
+
+    await request(unauthApp).get("/api/schemas").expect(401);
   });
 
-  afterEach(async () => {
-    await fs.rm(dir, { recursive: true, force: true });
+  it("GET /api/health is public", async () => {
+    await request(app).get("/api/health").expect(200);
   });
 
   it("GET /api/schemas lists built-in schemas", async () => {
@@ -113,11 +141,11 @@ describe("API integration", () => {
     expect(res.body.type).toBe("invoice");
   });
 
-  it("POST /api/extract rejects unknown schemaId", async () => {
+  it("POST /api/extract rejects inaccessible schemaId", async () => {
     await request(app)
       .post("/api/extract")
       .send({ text: "x", schemaId: "not_a_schema" })
-      .expect(400);
+      .expect(403);
   });
 
   it("POST /api/schemas creates custom schema", async () => {
@@ -231,5 +259,55 @@ describe("API integration", () => {
 
     const guidelines = await request(app).get("/api/guidelines").expect(200);
     expect(guidelines.body.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("isolates custom schemas and documents between users", async () => {
+    const created = await request(app)
+      .post("/api/schemas")
+      .send({
+        name: "Private PO",
+        fieldDefinitions: [
+          { key: "poNumber", type: "string", required: true },
+        ],
+      })
+      .expect(201);
+
+    const extract = await request(app)
+      .post("/api/extract")
+      .send({ text: "PO 999", schemaId: created.body.id })
+      .expect(200);
+
+    const saved = await request(app)
+      .post("/api/documents")
+      .send(extract.body)
+      .expect(201);
+
+    const appB = createApp({
+      docRepo: new JsonFileRepository(dir),
+      correctionRepo: new JsonCorrectionStore(dir),
+      llm: mockLlm,
+      schemaRegistry,
+      testUserId: USER_B,
+    });
+
+    await request(appB).get(`/api/schemas/${created.body.id}`).expect(404);
+    await request(appB)
+      .post("/api/extract")
+      .send({ text: "PO 999", schemaId: created.body.id })
+      .expect(403);
+    await request(appB).delete(`/api/schemas/${created.body.id}`).expect(404);
+    await request(appB).get("/api/documents").expect(200);
+    expect((await request(appB).get("/api/documents")).body.items).toHaveLength(
+      0
+    );
+    await request(appB).get(`/api/documents/${saved.body.id}`).expect(404);
+
+    const schemasB = await request(appB).get("/api/schemas").expect(200);
+    expect(
+      schemasB.body.some((s: { id: string }) => s.id === created.body.id)
+    ).toBe(false);
+    expect(
+      schemasB.body.some((s: { id: string }) => s.id === "invoice")
+    ).toBe(true);
   });
 });

@@ -10,10 +10,53 @@ import {
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/$/, "");
 
+interface AuthHandlers {
+  getAccessToken: () => Promise<string | null>;
+  onUnauthorized: () => Promise<void>;
+}
+
+let authHandlers: AuthHandlers | null = null;
+
+export function setAuthHandlers(handlers: AuthHandlers) {
+  authHandlers = handlers;
+}
+
+async function authFetch(
+  path: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  const headers = new Headers(options.headers);
+
+  if (authHandlers) {
+    const token = await authHandlers.getAccessToken();
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+  }
+
+  if (
+    options.body &&
+    !(options.body instanceof FormData) &&
+    !headers.has("Content-Type")
+  ) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers,
+  });
+
+  if (response.status === 401 && authHandlers) {
+    await authHandlers.onUnauthorized();
+  }
+
+  return response;
+}
+
 export async function extractDocument(text: string, schemaId?: string) {
-  const response = await fetch(`${API_BASE}/extract`, {
+  const response = await authFetch("/extract", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, schemaId }),
   });
 
@@ -39,7 +82,7 @@ export async function extractDocumentFromFile(
     formData.append("schemaId", schemaId);
   }
 
-  const response = await fetch(`${API_BASE}/extract-file`, {
+  const response = await authFetch("/extract-file", {
     method: "POST",
     body: formData,
   });
@@ -61,9 +104,8 @@ export async function extractDocumentFromFile(
 }
 
 export async function saveDocument(doc: ExtractedDocument) {
-  const response = await fetch(`${API_BASE}/documents`, {
+  const response = await authFetch("/documents", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(doc),
   });
 
@@ -86,7 +128,7 @@ export async function listDocuments(
     });
   }
 
-  const response = await fetch(`${API_BASE}/documents?${params.toString()}`);
+  const response = await authFetch(`/documents?${params.toString()}`);
 
   if (!response.ok) {
     throw new Error("Failed to fetch documents");
@@ -113,7 +155,7 @@ export async function listAllDocuments(
 }
 
 export async function getDocument(id: string) {
-  const response = await fetch(`${API_BASE}/documents/${id}`);
+  const response = await authFetch(`/documents/${id}`);
 
   if (!response.ok) {
     throw new Error("Failed to fetch document");
@@ -131,9 +173,8 @@ export async function submitCorrectionsBatch(
   }>,
   learningNotes?: string
 ) {
-  const response = await fetch(`${API_BASE}/documents/${docId}/correct-batch`, {
+  const response = await authFetch(`/documents/${docId}/correct-batch`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ corrections, learningNotes }),
   });
 
@@ -151,9 +192,8 @@ export async function submitCorrection(
   correctedValue: unknown,
   userExplanation?: string
 ) {
-  const response = await fetch(`${API_BASE}/documents/${docId}/correct`, {
+  const response = await authFetch(`/documents/${docId}/correct`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       field,
       originalValue,
@@ -175,7 +215,7 @@ export async function listGuidelines(docType?: string) {
     params.append("docType", docType);
   }
 
-  const response = await fetch(`${API_BASE}/guidelines?${params.toString()}`);
+  const response = await authFetch(`/guidelines?${params.toString()}`);
 
   if (!response.ok) {
     throw new Error("Failed to fetch guidelines");
@@ -190,7 +230,7 @@ export async function listCorrections(docType?: string) {
     params.append("docType", docType);
   }
 
-  const response = await fetch(`${API_BASE}/corrections?${params.toString()}`);
+  const response = await authFetch(`/corrections?${params.toString()}`);
 
   if (!response.ok) {
     throw new Error("Failed to fetch corrections");
@@ -200,7 +240,7 @@ export async function listCorrections(docType?: string) {
 }
 
 export async function listSchemas(): Promise<ExtractionSchemaSummary[]> {
-  const response = await fetch(`${API_BASE}/schemas`);
+  const response = await authFetch("/schemas");
   if (!response.ok) {
     throw new Error("Failed to fetch schemas");
   }
@@ -208,7 +248,7 @@ export async function listSchemas(): Promise<ExtractionSchemaSummary[]> {
 }
 
 export async function getSchema(id: string): Promise<ExtractionSchema> {
-  const response = await fetch(`${API_BASE}/schemas/${id}`);
+  const response = await authFetch(`/schemas/${id}`);
   if (!response.ok) {
     throw new Error("Failed to fetch schema");
   }
@@ -222,9 +262,8 @@ export async function saveSchema(payload: {
   fieldDefinitions: FieldDefinition[];
   prompt?: string;
 }): Promise<ExtractionSchema> {
-  const response = await fetch(`${API_BASE}/schemas`, {
+  const response = await authFetch("/schemas", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
@@ -237,7 +276,7 @@ export async function saveSchema(payload: {
 }
 
 export async function deleteSchema(id: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/schemas/${id}`, {
+  const response = await authFetch(`/schemas/${id}`, {
     method: "DELETE",
   });
   if (!response.ok) {
@@ -253,9 +292,8 @@ export async function proposeSchema(payload: {
   name?: string;
   description?: string;
 }): Promise<ProposedSchemaDraft> {
-  const response = await fetch(`${API_BASE}/schemas/propose`, {
+  const response = await authFetch("/schemas/propose", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   if (!response.ok) {

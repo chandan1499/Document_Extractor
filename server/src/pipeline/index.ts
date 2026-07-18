@@ -88,6 +88,7 @@ export async function extract<T>(
   docType: DocType,
   llmProvider: LLMProvider,
   schemaRegistry: SchemaRegistry,
+  userId: string,
   guidelines?: Guideline[]
 ): Promise<{
   data: T;
@@ -96,7 +97,7 @@ export async function extract<T>(
   fieldMeta?: FieldMeta[];
 }> {
   try {
-    const entry = schemaRegistry.getEntry(docType);
+    const entry = await schemaRegistry.getEntry(docType, userId);
 
     const { data, appliedChanges, fieldMeta } = await llmProvider.extract<T>(
       text,
@@ -129,15 +130,16 @@ export async function extract<T>(
 /**
  * Validation: structural (runtime Zod from field definitions) + semantic validators
  */
-export function validate(
+export async function validate(
   data: Record<string, unknown>,
   docType: DocType,
-  schemaRegistry: SchemaRegistry
-): { errors: ValidationIssue[]; warnings: ValidationIssue[] } {
+  schemaRegistry: SchemaRegistry,
+  userId: string
+): Promise<{ errors: ValidationIssue[]; warnings: ValidationIssue[] }> {
   const errors: ValidationIssue[] = [];
   const warnings: ValidationIssue[] = [];
 
-  const entry = schemaRegistry.getEntry(docType);
+  const entry = await schemaRegistry.getEntry(docType, userId);
 
   if (entry.fieldDefinitions && entry.fieldDefinitions.length > 0) {
     const schemaValidator = buildZodFromFields(entry.fieldDefinitions);
@@ -179,6 +181,7 @@ export async function extractDocument(
   rawInput: string | Buffer,
   llmProvider: LLMProvider,
   schemaRegistry: SchemaRegistry,
+  userId: string,
   guidelines?: Guideline[],
   guidelineLoader?: (docType: string) => Promise<Guideline[]>,
   options?: ExtractDocumentOptions
@@ -190,7 +193,7 @@ export async function extractDocument(
     let docType: DocType;
 
     if (options?.schemaId) {
-      if (!schemaRegistry.has(options.schemaId)) {
+      if (!(await schemaRegistry.has(options.schemaId, userId))) {
         throw new Error(`Unknown schema: ${options.schemaId}`);
       }
       docType = options.schemaId;
@@ -199,7 +202,7 @@ export async function extractDocument(
       docType = await classify(
         cleaned,
         llmProvider,
-        schemaRegistry.listTypes()
+        await schemaRegistry.listTypes(userId)
       );
     }
 
@@ -218,14 +221,20 @@ export async function extractDocument(
 
     const { data, appliedChanges, fieldMeta: rawFieldMeta } =
       await extract<Record<string, unknown>>(
-      cleaned,
-      docType,
-      llmProvider,
-      schemaRegistry,
-      applicableGuidelines
-    );
+        cleaned,
+        docType,
+        llmProvider,
+        schemaRegistry,
+        userId,
+        applicableGuidelines
+      );
 
-    const { errors, warnings } = validate(data, docType, schemaRegistry);
+    const { errors, warnings } = await validate(
+      data,
+      docType,
+      schemaRegistry,
+      userId
+    );
 
     const alignedMeta = ensureFieldMetaCoverage(
       data,

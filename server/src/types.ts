@@ -26,6 +26,11 @@ export interface FieldDefinition {
   properties?: FieldDefinition[];
 }
 
+export interface AuthUser {
+  id: string;
+  email?: string;
+}
+
 export interface ExtractionSchema {
   id: string;
   name: string;
@@ -34,6 +39,7 @@ export interface ExtractionSchema {
   prompt: string;
   fieldDefinitions: FieldDefinition[] | null;
   isBuiltin: boolean;
+  userId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -55,10 +61,10 @@ export interface ProposedSchemaDraft {
 }
 
 export interface SchemaRepository {
-  list(): Promise<ExtractionSchema[]>;
-  findById(id: string): Promise<ExtractionSchema | null>;
-  save(schema: ExtractionSchema): Promise<ExtractionSchema>;
-  delete(id: string): Promise<boolean>;
+  list(userId: string): Promise<ExtractionSchema[]>;
+  findById(id: string, userId: string): Promise<ExtractionSchema | null>;
+  save(schema: ExtractionSchema, userId: string): Promise<ExtractionSchema>;
+  delete(id: string, userId: string): Promise<boolean>;
   upsertIfMissing(schema: ExtractionSchema): Promise<void>;
 }
 
@@ -103,6 +109,7 @@ export interface ExtractedDocument {
   confidence?: number;
   fieldMeta?: FieldMeta[];
   extractionText?: string;
+  userId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -128,6 +135,7 @@ export interface Correction {
   contextSnippet?: string;
   scopeKey?: string; // e.g., vendor name
   userExplanation?: string;
+  userId?: string;
   createdAt: string;
 }
 
@@ -137,6 +145,7 @@ export interface Guideline {
   scopeKey?: string;
   rule: string;
   sourceCorrectionIds: string[];
+  userId?: string;
   createdAt: string;
 }
 
@@ -151,10 +160,13 @@ export interface PaginatedResult<T> {
 
 // Repository
 export interface DocumentRepository {
-  save(doc: ExtractedDocument): Promise<ExtractedDocument>;
-  findById(id: string): Promise<ExtractedDocument | null>;
-  list(): Promise<ExtractedDocument[]>;
-  search(filters: DocumentFilters): Promise<PaginatedResult<ExtractedDocument>>;
+  save(doc: ExtractedDocument, userId: string): Promise<ExtractedDocument>;
+  findById(id: string, userId: string): Promise<ExtractedDocument | null>;
+  list(userId: string): Promise<ExtractedDocument[]>;
+  search(
+    filters: DocumentFilters,
+    userId: string
+  ): Promise<PaginatedResult<ExtractedDocument>>;
 }
 
 export interface DocumentFilters {
@@ -169,10 +181,14 @@ export interface DocumentFilters {
 }
 
 export interface CorrectionRepository {
-  saveCorrection(correction: Correction): Promise<Correction>;
-  listCorrections(docType?: DocType): Promise<Correction[]>;
-  saveGuideline(guideline: Guideline): Promise<Guideline>;
-  listGuidelines(docType?: DocType, scopeKey?: string): Promise<Guideline[]>;
+  saveCorrection(correction: Correction, userId: string): Promise<Correction>;
+  listCorrections(docType: DocType | undefined, userId: string): Promise<Correction[]>;
+  saveGuideline(guideline: Guideline, userId: string): Promise<Guideline>;
+  listGuidelines(
+    docType: DocType | undefined,
+    userId: string,
+    scopeKey?: string
+  ): Promise<Guideline[]>;
 }
 
 /** One field changed by a learned guideline during extraction */

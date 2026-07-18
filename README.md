@@ -37,6 +37,8 @@ The core challenge is scale — organizations deal with a sea of unstructured do
 - Modal view for viewing complete extracted document details
 - Centered loading overlay during extraction
 - Scrollable error/warning section at bottom of extracted fields
+- **User accounts** via Supabase Auth (email/password sign-in, sign-out)
+- **Private data per user** — custom schemas, documents, corrections, and guidelines are scoped to the logged-in account
 
 ### Intentionally Excluded (& Why)
 - **DOCX/RTF Support** — JSON store + text-only parsing keeps the scope focused on core extraction logic. Extending to format-specific libraries is a one-liner in the pipeline.
@@ -316,8 +318,10 @@ Try the live app at https://document-extractor-01.netlify.app/ or run locally:
 
 2. **Set up Supabase**
    1. Create a free Supabase project
-   2. Open **SQL Editor** and run `server/db/schema.sql` (includes `field_metadata` and `extraction_text` on `documents`)
-   3. Copy the **Connection string → URI** (use the **Transaction pooler** on port 6543)
+   2. Open **SQL Editor** and run `server/db/schema.sql`
+   3. Enable **Authentication → Email** (and optional OAuth providers)
+   4. Copy **Project Settings → API**: Project URL, anon key, and JWT secret
+   5. Copy the **Connection string → URI** (use the **Transaction pooler** on port 6543)
 
    **Existing databases:** run migrations after pulling new changes:
    ```bash
@@ -328,8 +332,15 @@ Try the live app at https://document-extractor-01.netlify.app/ or run locally:
 3. **Configure environment**
    ```bash
    cp .env.example server/.env
-   # Edit server/.env — set DATABASE_URL, GROQ_API_KEY, and model names
+   # Edit server/.env — set DATABASE_URL, GROQ_API_KEY, SUPABASE_URL, SUPABASE_JWT_SECRET
    # Check https://console.groq.com/keys for available models
+   ```
+
+   For the client, set in `.env` at repo root or `client/.env`:
+   ```
+   VITE_SUPABASE_URL=https://[project].supabase.co
+   VITE_SUPABASE_ANON_KEY=your_anon_key
+   VITE_API_URL=http://localhost:4000/api
    ```
 
 4. **Run locally**
@@ -388,7 +399,7 @@ Not included in this MVP, but ready to containerize. Suggested:
 - [ ] Embedding-based similarity for learned guideline retrieval (more relevant context)
 - [ ] Batch processing (bulk upload multiple documents)
 - [ ] Analytics dashboard (extraction success rate, most common corrections)
-- [ ] User accounts / multi-tenancy (separate data per org)
+- [x] User accounts / multi-tenancy (Supabase Auth; private data per user)
 - [ ] Webhook integration (notify downstream systems when documents are ready)
 
 ### Long Term
@@ -434,10 +445,12 @@ Configured via `netlify.toml` at the repo root:
   publish = "dist"
 ```
 
-Set this environment variable in the Netlify dashboard:
+Set these environment variables in the Netlify dashboard:
 
 ```
 VITE_API_URL=https://document-extractor-mc4d.onrender.com/api
+VITE_SUPABASE_URL=https://[project].supabase.co
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 ```
 
 The client reads `VITE_API_URL` (falls back to `/api` for local dev with the Vite proxy).
@@ -449,7 +462,7 @@ Configured via [`render.yaml`](render.yaml) or manually:
 - **Root directory:** `server`
 - **Build command:** `npm install && npm run build`
 - **Start command:** `npm start`
-- **Env vars:** `DATABASE_URL`, `GROQ_API_KEY`, `PORT`, `EXTRACT_MODEL`, `CLASSIFY_MODEL`
+- **Env vars:** `DATABASE_URL`, `GROQ_API_KEY`, `SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `PORT`, `EXTRACT_MODEL`, `CLASSIFY_MODEL`
 
 **Supabase setup:**
 1. Create a free Supabase project
@@ -498,7 +511,7 @@ Response:
 4. **Groq model availability**: Model names vary by subscription tier. Always check https://console.groq.com/keys for available models and update `.env` accordingly.
 5. **OCR timeout**: Image OCR has a 30-second timeout. Very large or complex images may timeout.
 6. **Groq rate limits**: Free tier caps at 30 RPM (one request every 2 seconds). Fine for a demo, upgrade for production.
-7. **No OAuth**: Anyone with the URL can upload. Add auth (Clerk, Auth0) for production.
+7. **Auth required**: All API routes except `/api/health` require a valid Supabase JWT. Pre-auth demo data (`user_id IS NULL`) is not visible to new accounts.
 8. **PDF handling**: `pdf-parse` works for text-based PDFs only. Scanned PDFs (image-only) require OCR via image extraction.
 9. **CSV handling**: Converts CSV to formatted text; complex nested structures may not extract optimally.
 10. **Render cold starts**: Free-tier backend sleeps after inactivity; first request may take 30–60 seconds.

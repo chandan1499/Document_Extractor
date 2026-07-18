@@ -11,6 +11,7 @@ interface SchemaRow {
   prompt: string;
   field_definitions: ExtractionSchema["fieldDefinitions"];
   is_builtin: boolean;
+  user_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -24,6 +25,7 @@ function rowToSchema(row: SchemaRow): ExtractionSchema {
     prompt: row.prompt,
     fieldDefinitions: row.field_definitions,
     isBuiltin: row.is_builtin,
+    userId: row.user_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -32,33 +34,57 @@ function rowToSchema(row: SchemaRow): ExtractionSchema {
 export class PostgresSchemaRepository implements SchemaRepository {
   constructor(private pool: pg.Pool) {}
 
-  async list(): Promise<ExtractionSchema[]> {
+  async list(userId: string): Promise<ExtractionSchema[]> {
     const result = await this.pool.query<SchemaRow>(
-      "SELECT * FROM extraction_schemas ORDER BY is_builtin DESC, name ASC"
+      `SELECT * FROM extraction_schemas
+       WHERE is_builtin = true OR user_id = $1
+       ORDER BY is_builtin DESC, name ASC`,
+      [userId]
     );
     return result.rows.map(rowToSchema);
   }
 
-  async findById(id: string): Promise<ExtractionSchema | null> {
+  async findById(id: string, userId: string): Promise<ExtractionSchema | null> {
     const result = await this.pool.query<SchemaRow>(
-      "SELECT * FROM extraction_schemas WHERE id = $1",
-      [id]
+      `SELECT * FROM extraction_schemas
+       WHERE id = $1 AND (is_builtin = true OR user_id = $2)`,
+      [id, userId]
     );
     if (result.rows.length === 0) return null;
     return rowToSchema(result.rows[0]);
   }
 
-  async save(schema: ExtractionSchema): Promise<ExtractionSchema> {
+  async save(schema: ExtractionSchema, userId: string): Promise<ExtractionSchema> {
+    if (schema.isBuiltin) {
+      throw new Error("Cannot save built-in schema via user API");
+    }
+
+    const existing = await this.pool.query<SchemaRow>(
+      "SELECT * FROM extraction_schemas WHERE id = $1",
+      [schema.id]
+    );
+
+    if (existing.rows.length > 0) {
+      const row = existing.rows[0];
+      if (row.is_builtin) {
+        throw new Error("Cannot modify built-in schema");
+      }
+      if (row.user_id !== userId) {
+        throw new Error("Schema not accessible");
+      }
+    }
+
     schema.updatedAt = new Date().toISOString();
     if (!schema.createdAt) {
       schema.createdAt = schema.updatedAt;
     }
+    schema.userId = userId;
 
     await this.pool.query(
       `INSERT INTO extraction_schemas (
         id, name, description, json_schema, prompt, field_definitions,
-        is_builtin, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        is_builtin, user_id, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         description = EXCLUDED.description,
@@ -75,7 +101,8 @@ export class PostgresSchemaRepository implements SchemaRepository {
         schema.fieldDefinitions
           ? JSON.stringify(schema.fieldDefinitions)
           : null,
-        schema.isBuiltin,
+        false,
+        userId,
         schema.createdAt,
         schema.updatedAt,
       ]
@@ -84,18 +111,46 @@ export class PostgresSchemaRepository implements SchemaRepository {
     return schema;
   }
 
-  async delete(id: string): Promise<boolean> {
+  async delete(id: string, userId: string): Promise<boolean> {
     const result = await this.pool.query(
-      "DELETE FROM extraction_schemas WHERE id = $1 AND is_builtin = false",
-      [id]
+      `DELETE FROM extraction_schemas
+       WHERE id = $1 AND user_id = $2 AND is_builtin = false`,
+      [id, userId]
     );
     return (result.rowCount ?? 0) > 0;
   }
 
   async upsertIfMissing(schema: ExtractionSchema): Promise<void> {
-    const existing = await this.findById(schema.id);
-    if (!existing) {
-      await this.save(schema);
+    const existing = await this.pool.query<SchemaRow>(
+      "SELECT * FROM extraction_schemas WHERE id = $1",
+      [schema.id]
+    );
+    if (existing.rows.length === 0) {
+      schema.updatedAt = new Date().toISOString();
+      if (!schema.createdAt) {
+        schema.createdAt = schema.updatedAt;
+      }
+
+      await this.pool.query(
+        `INSERT INTO extraction_schemas (
+          id, name, description, json_schema, prompt, field_definitions,
+          is_builtin, user_id, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          schema.id,
+          schema.name,
+          schema.description,
+          JSON.stringify(schema.jsonSchema),
+          schema.prompt,
+          schema.fieldDefinitions
+            ? JSON.stringify(schema.fieldDefinitions)
+            : null,
+          schema.isBuiltin,
+          schema.userId ?? null,
+          schema.createdAt,
+          schema.updatedAt,
+        ]
+      );
     }
   }
 }
@@ -131,26 +186,36 @@ export class JsonSchemaRepository implements SchemaRepository {
     await fs.writeFile(this.schemasFile, JSON.stringify(data, null, 2));
   }
 
-  async list(): Promise<ExtractionSchema[]> {
+  async list(userId: string): Promise<ExtractionSchema[]> {
     const data = await this.readData();
-    return data.schemas.sort((a, b) => {
-      if (a.isBuiltin !== b.isBuiltin) return a.isBuiltin ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
+    return data.schemas
+      .filter((s) => s.isBuiltin || s.userId === userId)
+      .sort((a, b) => {
+        if (a.isBuiltin !== b.isBuiltin) return a.isBuiltin ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
   }
 
-  async findById(id: string): Promise<ExtractionSchema | null> {
+  async findById(id: string, userId: string): Promise<ExtractionSchema | null> {
     const data = await this.readData();
-    return data.schemas.find((s) => s.id === id) ?? null;
+    const schema = data.schemas.find((s) => s.id === id);
+    if (!schema) return null;
+    if (schema.isBuiltin || schema.userId === userId) return schema;
+    return null;
   }
 
-  async save(schema: ExtractionSchema): Promise<ExtractionSchema> {
+  async save(schema: ExtractionSchema, userId: string): Promise<ExtractionSchema> {
     const data = await this.readData();
     const idx = data.schemas.findIndex((s) => s.id === schema.id);
     schema.updatedAt = new Date().toISOString();
+    schema.userId = userId;
+
     if (idx >= 0) {
-      if (data.schemas[idx].isBuiltin && !schema.isBuiltin) {
+      if (data.schemas[idx].isBuiltin) {
         throw new Error("Cannot overwrite built-in schema");
+      }
+      if (data.schemas[idx].userId !== userId) {
+        throw new Error("Schema not accessible");
       }
       if (!schema.createdAt) schema.createdAt = data.schemas[idx].createdAt;
       data.schemas[idx] = schema;
@@ -162,19 +227,23 @@ export class JsonSchemaRepository implements SchemaRepository {
     return schema;
   }
 
-  async delete(id: string): Promise<boolean> {
+  async delete(id: string, userId: string): Promise<boolean> {
     const data = await this.readData();
     const target = data.schemas.find((s) => s.id === id);
-    if (!target || target.isBuiltin) return false;
+    if (!target || target.isBuiltin || target.userId !== userId) return false;
     data.schemas = data.schemas.filter((s) => s.id !== id);
     await this.writeData(data);
     return true;
   }
 
   async upsertIfMissing(schema: ExtractionSchema): Promise<void> {
-    const existing = await this.findById(schema.id);
+    const data = await this.readData();
+    const existing = data.schemas.find((s) => s.id === schema.id);
     if (!existing) {
-      await this.save(schema);
+      schema.updatedAt = new Date().toISOString();
+      if (!schema.createdAt) schema.createdAt = schema.updatedAt;
+      data.schemas.push(schema);
+      await this.writeData(data);
     }
   }
 }

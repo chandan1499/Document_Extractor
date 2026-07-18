@@ -44,74 +44,85 @@ export class JsonCorrectionStore implements CorrectionRepository {
     await fs.writeFile(this.correctionsFile, JSON.stringify(data, null, 2));
   }
 
-  async saveCorrection(correction: Correction): Promise<Correction> {
+  async saveCorrection(
+    correction: Correction,
+    userId: string
+  ): Promise<Correction> {
     const data = await this.readData();
 
     correction.id = uuidv4();
     correction.createdAt = new Date().toISOString();
+    correction.userId = userId;
     data.corrections.push(correction);
 
     await this.writeData(data);
     return correction;
   }
 
-  async listCorrections(docType?: DocType): Promise<Correction[]> {
+  async listCorrections(
+    docType: DocType | undefined,
+    userId: string
+  ): Promise<Correction[]> {
     const data = await this.readData();
+    let results = data.corrections.filter((c) => c.userId === userId);
 
     if (docType) {
-      return data.corrections.filter((c) => c.docType === docType);
+      results = results.filter((c) => c.docType === docType);
     }
 
-    return data.corrections;
+    return results;
   }
 
-  async saveGuideline(guideline: Guideline): Promise<Guideline> {
+  async saveGuideline(
+    guideline: Guideline,
+    userId: string
+  ): Promise<Guideline> {
     const data = await this.readData();
+    guideline.userId = userId;
 
-    // Check for duplicates or similar rules
     const existingIdx = data.guidelines.findIndex(
       (g) =>
+        g.userId === userId &&
         g.docType === guideline.docType &&
         g.scopeKey === guideline.scopeKey &&
         g.rule.toLowerCase() === guideline.rule.toLowerCase()
     );
 
     if (existingIdx >= 0) {
-      // Update existing guideline's source corrections
       data.guidelines[existingIdx].sourceCorrectionIds = Array.from(
         new Set([
           ...data.guidelines[existingIdx].sourceCorrectionIds,
           ...guideline.sourceCorrectionIds,
         ])
       );
-    } else {
-      guideline.id = uuidv4();
-      guideline.createdAt = new Date().toISOString();
-      data.guidelines.push(guideline);
+      return data.guidelines[existingIdx];
     }
+
+    guideline.id = uuidv4();
+    guideline.createdAt = new Date().toISOString();
+    data.guidelines.push(guideline);
 
     await this.writeData(data);
     return guideline;
   }
 
   async listGuidelines(
-    docType?: DocType,
+    docType: DocType | undefined,
+    userId: string,
     scopeKey?: string
   ): Promise<Guideline[]> {
     const data = await this.readData();
 
-    let results = data.guidelines;
+    let results = data.guidelines.filter((g) => g.userId === userId);
 
     if (docType) {
       results = results.filter((g) => g.docType === docType);
     }
 
     if (scopeKey !== undefined) {
-      // Include both the scope-specific rules and the global rules
       results = results.filter((g) => !g.scopeKey || g.scopeKey === scopeKey);
     }
 
-    // Return most recent first
     return results.sort(
       (a, b) =>
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()

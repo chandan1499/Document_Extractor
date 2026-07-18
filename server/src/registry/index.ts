@@ -25,7 +25,7 @@ export const BUILTIN_VALIDATORS: Record<string, Validator[]> = {
 };
 
 export class SchemaRegistry {
-  private cache = new Map<string, ExtractionSchema>();
+  private builtinCache = new Map<string, ExtractionSchema>();
 
   constructor(private repo: SchemaRepository) {}
 
@@ -33,23 +33,24 @@ export class SchemaRegistry {
     for (const seed of getBuiltinSchemaSeeds()) {
       await this.repo.upsertIfMissing(seed);
     }
-    await this.refresh();
+    await this.refreshBuiltins();
   }
 
-  async refresh(): Promise<void> {
-    const schemas = await this.repo.list();
-    this.cache.clear();
-    for (const schema of schemas) {
-      this.cache.set(schema.id, schema);
+  private async refreshBuiltins(): Promise<void> {
+    this.builtinCache.clear();
+    for (const seed of getBuiltinSchemaSeeds()) {
+      this.builtinCache.set(seed.id, seed);
     }
   }
 
-  has(id: string): boolean {
-    return this.cache.has(id);
+  async has(id: string, userId: string): Promise<boolean> {
+    if (this.builtinCache.has(id)) return true;
+    const schema = await this.repo.findById(id, userId);
+    return schema !== null && !schema.isBuiltin;
   }
 
-  getEntry(id: DocType): RegistryEntry {
-    const schema = this.cache.get(id);
+  async getEntry(id: DocType, userId: string): Promise<RegistryEntry> {
+    const schema = await this.getSchema(id, userId);
     if (!schema) {
       throw new Error(`Unknown schema: ${id}`);
     }
@@ -61,12 +62,19 @@ export class SchemaRegistry {
     };
   }
 
-  getSchema(id: string): ExtractionSchema | undefined {
-    return this.cache.get(id);
+  async getSchema(
+    id: string,
+    userId: string
+  ): Promise<ExtractionSchema | undefined> {
+    const builtin = this.builtinCache.get(id);
+    if (builtin) return builtin;
+    const schema = await this.repo.findById(id, userId);
+    return schema ?? undefined;
   }
 
-  listTypes(): SchemaTypeInfo[] {
-    return Array.from(this.cache.values()).map((s) => ({
+  async listTypes(userId: string): Promise<SchemaTypeInfo[]> {
+    const schemas = await this.listSchemas(userId);
+    return schemas.map((s) => ({
       id: s.id,
       name: s.name,
       description: s.description,
@@ -74,35 +82,47 @@ export class SchemaRegistry {
     }));
   }
 
-  listSchemas(): ExtractionSchema[] {
-    return Array.from(this.cache.values()).sort((a, b) => {
+  async listSchemas(userId: string): Promise<ExtractionSchema[]> {
+    const custom = await this.repo.list(userId);
+    const byId = new Map<string, ExtractionSchema>();
+
+    for (const builtin of this.builtinCache.values()) {
+      byId.set(builtin.id, builtin);
+    }
+    for (const schema of custom) {
+      if (!schema.isBuiltin) {
+        byId.set(schema.id, schema);
+      }
+    }
+
+    return Array.from(byId.values()).sort((a, b) => {
       if (a.isBuiltin !== b.isBuiltin) return a.isBuiltin ? -1 : 1;
       return a.name.localeCompare(b.name);
     });
   }
 
-  async register(schema: ExtractionSchema): Promise<ExtractionSchema> {
+  async register(
+    schema: ExtractionSchema,
+    userId: string
+  ): Promise<ExtractionSchema> {
     if (schema.isBuiltin) {
       throw new Error("Cannot register built-in schema via API");
     }
-    const saved = await this.repo.save(schema);
-    this.cache.set(saved.id, saved);
-    return saved;
+    return this.repo.save(schema, userId);
   }
 
-  async unregister(id: string): Promise<void> {
-    const existing = this.cache.get(id);
+  async unregister(id: string, userId: string): Promise<void> {
+    const existing = await this.repo.findById(id, userId);
     if (!existing) {
       throw new Error(`Schema not found: ${id}`);
     }
     if (existing.isBuiltin) {
       throw new Error("Cannot delete built-in schema");
     }
-    const deleted = await this.repo.delete(id);
+    const deleted = await this.repo.delete(id, userId);
     if (!deleted) {
       throw new Error(`Failed to delete schema: ${id}`);
     }
-    this.cache.delete(id);
   }
 }
 

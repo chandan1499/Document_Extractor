@@ -11,6 +11,10 @@ import { logger } from "../config/logger.js";
 
 type FileRequest = Request & { file?: Express.Multer.File };
 
+function getUserId(req: Request): string {
+  return req.user!.id;
+}
+
 export function createRoutes(
   docRepo: DocumentRepository,
   correctionRepo: CorrectionRepository,
@@ -28,6 +32,7 @@ export function createRoutes(
    */
   router.post("/api/extract", async (req: Request, res: Response) => {
     try {
+      const userId = getUserId(req);
       const { text, docType, schemaId } = req.body;
       const resolvedSchemaId = schemaId || docType;
 
@@ -35,24 +40,29 @@ export function createRoutes(
         return res.status(400).json({ error: "Missing or invalid text field" });
       }
 
-      if (resolvedSchemaId && !schemaRegistry.has(resolvedSchemaId)) {
-        return res.status(400).json({ error: `Unknown schema: ${resolvedSchemaId}` });
+      if (
+        resolvedSchemaId &&
+        !(await schemaRegistry.has(resolvedSchemaId, userId))
+      ) {
+        return res.status(403).json({ error: "Schema not accessible" });
       }
 
       let guidelines: Guideline[] = [];
       if (resolvedSchemaId) {
         guidelines = await correctionRepo.listGuidelines(
-          resolvedSchemaId as DocType
+          resolvedSchemaId as DocType,
+          userId
         );
       }
 
       const guidelineLoader = async (detectedDocType: string) =>
-        correctionRepo.listGuidelines(detectedDocType as DocType);
+        correctionRepo.listGuidelines(detectedDocType as DocType, userId);
 
       const doc = await extractDocument(
         text,
         llmProvider,
         schemaRegistry,
+        userId,
         guidelines,
         guidelineLoader,
         resolvedSchemaId ? { schemaId: resolvedSchemaId } : undefined
@@ -62,7 +72,7 @@ export function createRoutes(
     } catch (error) {
       logger.error(error, "Extract request failed");
       const message = error instanceof Error ? error.message : "Unknown error";
-      const status = message.startsWith("Unknown schema:") ? 400 : 500;
+      const status = message.startsWith("Unknown schema:") ? 403 : 500;
       res.status(status).json({
         error: "Failed to extract document",
         details: message,
@@ -80,6 +90,8 @@ export function createRoutes(
       upload.single("file") as unknown as RequestHandler,
       async (req: FileRequest, res: Response) => {
         try {
+          const userId = getUserId(req);
+
           if (!req.file) {
             return res.status(400).json({ error: "No file provided" });
           }
@@ -87,10 +99,11 @@ export function createRoutes(
           const { docType, schemaId } = req.body;
           const resolvedSchemaId = schemaId || docType;
 
-          if (resolvedSchemaId && !schemaRegistry.has(resolvedSchemaId)) {
-            return res.status(400).json({
-              error: `Unknown schema: ${resolvedSchemaId}`,
-            });
+          if (
+            resolvedSchemaId &&
+            !(await schemaRegistry.has(resolvedSchemaId, userId))
+          ) {
+            return res.status(403).json({ error: "Schema not accessible" });
           }
 
           const text = await extractTextFromFile(
@@ -108,17 +121,19 @@ export function createRoutes(
           let guidelines: Guideline[] = [];
           if (resolvedSchemaId) {
             guidelines = await correctionRepo.listGuidelines(
-              resolvedSchemaId as DocType
+              resolvedSchemaId as DocType,
+              userId
             );
           }
 
           const guidelineLoader = async (detectedDocType: string) =>
-            correctionRepo.listGuidelines(detectedDocType as DocType);
+            correctionRepo.listGuidelines(detectedDocType as DocType, userId);
 
           const doc = await extractDocument(
             text,
             llmProvider,
             schemaRegistry,
+            userId,
             guidelines,
             guidelineLoader,
             resolvedSchemaId ? { schemaId: resolvedSchemaId } : undefined
@@ -142,8 +157,17 @@ export function createRoutes(
    */
   router.post("/api/documents", async (req: Request, res: Response) => {
     try {
-      const { type, originalText, extractedData, validationErrors, appliedChanges, fieldMeta, extractionText, confidence } =
-        req.body;
+      const userId = getUserId(req);
+      const {
+        type,
+        originalText,
+        extractedData,
+        validationErrors,
+        appliedChanges,
+        fieldMeta,
+        extractionText,
+        confidence,
+      } = req.body;
 
       if (!type || !extractedData) {
         return res.status(400).json({
@@ -166,7 +190,7 @@ export function createRoutes(
         updatedAt: new Date().toISOString(),
       };
 
-      const saved = await docRepo.save(doc);
+      const saved = await docRepo.save(doc, userId);
       res.status(201).json(saved);
     } catch (error) {
       logger.error(error, "Save document request failed");
@@ -180,8 +204,9 @@ export function createRoutes(
    */
   router.get("/api/documents", async (req: Request, res: Response) => {
     try {
+      const userId = getUserId(req);
       const filters = req.query;
-      const result = await docRepo.search(filters);
+      const result = await docRepo.search(filters, userId);
       res.json(result);
     } catch (error) {
       logger.error(error, "List documents request failed");
@@ -195,7 +220,8 @@ export function createRoutes(
    */
   router.get("/api/documents/:id", async (req: Request, res: Response) => {
     try {
-      const doc = await docRepo.findById(req.params.id);
+      const userId = getUserId(req);
+      const doc = await docRepo.findById(req.params.id, userId);
       if (!doc) {
         return res.status(404).json({ error: "Document not found" });
       }
@@ -214,6 +240,7 @@ export function createRoutes(
     "/api/documents/:id/correct-batch",
     async (req: Request, res: Response) => {
       try {
+        const userId = getUserId(req);
         const { corrections, learningNotes } = req.body as {
           corrections?: CorrectionInput[];
           learningNotes?: string;
@@ -225,23 +252,26 @@ export function createRoutes(
             .json({ error: "corrections must be a non-empty array" });
         }
 
-        const doc = await docRepo.findById(req.params.id);
+        const doc = await docRepo.findById(req.params.id, userId);
         if (!doc) {
           return res.status(404).json({ error: "Document not found" });
         }
 
         const savedCorrections = [];
         for (const item of corrections) {
-          const correction = await correctionRepo.saveCorrection({
-            id: "",
-            docType: doc.type,
-            field: item.field,
-            originalValue: item.originalValue,
-            correctedValue: item.correctedValue,
-            contextSnippet: doc.originalText.slice(0, 200),
-            userExplanation: learningNotes?.trim() || undefined,
-            createdAt: new Date().toISOString(),
-          });
+          const correction = await correctionRepo.saveCorrection(
+            {
+              id: "",
+              docType: doc.type,
+              field: item.field,
+              originalValue: item.originalValue,
+              correctedValue: item.correctedValue,
+              contextSnippet: doc.originalText.slice(0, 200),
+              userExplanation: learningNotes?.trim() || undefined,
+              createdAt: new Date().toISOString(),
+            },
+            userId
+          );
           savedCorrections.push(correction);
         }
 
@@ -255,13 +285,16 @@ export function createRoutes(
           );
           const sourceIds = savedCorrections.map((c) => c.id);
           for (const rule of rules) {
-            const guideline = await correctionRepo.saveGuideline({
-              id: "",
-              docType: doc.type,
-              rule,
-              sourceCorrectionIds: sourceIds,
-              createdAt: new Date().toISOString(),
-            });
+            const guideline = await correctionRepo.saveGuideline(
+              {
+                id: "",
+                docType: doc.type,
+                rule,
+                sourceCorrectionIds: sourceIds,
+                createdAt: new Date().toISOString(),
+              },
+              userId
+            );
             guidelines.push(guideline);
           }
         }
@@ -289,40 +322,44 @@ export function createRoutes(
     "/api/documents/:id/correct",
     async (req: Request, res: Response) => {
       try {
+        const userId = getUserId(req);
         const { field, originalValue, correctedValue, userExplanation } =
           req.body;
 
-        const doc = await docRepo.findById(req.params.id);
+        const doc = await docRepo.findById(req.params.id, userId);
         if (!doc) {
           return res.status(404).json({ error: "Document not found" });
         }
 
-        // Save the correction
-        const correction = await correctionRepo.saveCorrection({
-          id: "",
-          docType: doc.type,
-          field,
-          originalValue,
-          correctedValue,
-          contextSnippet: doc.originalText.slice(0, 200),
-          userExplanation,
-          createdAt: new Date().toISOString(),
-        });
-
-        // If user provided an explanation, create a guideline
-        if (userExplanation) {
-          await correctionRepo.saveGuideline({
+        const correction = await correctionRepo.saveCorrection(
+          {
             id: "",
             docType: doc.type,
-            rule: userExplanation,
-            sourceCorrectionIds: [correction.id],
+            field,
+            originalValue,
+            correctedValue,
+            contextSnippet: doc.originalText.slice(0, 200),
+            userExplanation,
             createdAt: new Date().toISOString(),
-          });
+          },
+          userId
+        );
+
+        if (userExplanation) {
+          await correctionRepo.saveGuideline(
+            {
+              id: "",
+              docType: doc.type,
+              rule: userExplanation,
+              sourceCorrectionIds: [correction.id],
+              createdAt: new Date().toISOString(),
+            },
+            userId
+          );
         }
 
-        // Update the document with the correction
         doc.extractedData[field] = correctedValue;
-        await docRepo.save(doc);
+        await docRepo.save(doc, userId);
 
         res.status(201).json({
           correction,
@@ -341,8 +378,9 @@ export function createRoutes(
    */
   router.get("/api/guidelines", async (req: Request, res: Response) => {
     try {
+      const userId = getUserId(req);
       const docType = req.query.docType as DocType | undefined;
-      const guidelines = await correctionRepo.listGuidelines(docType);
+      const guidelines = await correctionRepo.listGuidelines(docType, userId);
       res.json(guidelines);
     } catch (error) {
       logger.error(error, "Get guidelines request failed");
@@ -356,21 +394,14 @@ export function createRoutes(
    */
   router.get("/api/corrections", async (req: Request, res: Response) => {
     try {
+      const userId = getUserId(req);
       const docType = req.query.docType as DocType | undefined;
-      const corrections = await correctionRepo.listCorrections(docType);
+      const corrections = await correctionRepo.listCorrections(docType, userId);
       res.json(corrections);
     } catch (error) {
       logger.error(error, "Get corrections request failed");
       res.status(500).json({ error: "Failed to fetch corrections" });
     }
-  });
-
-  /**
-   * GET /api/health
-   * Health check
-   */
-  router.get("/api/health", (req: Request, res: Response) => {
-    res.json({ status: "ok" });
   });
 
   return router;

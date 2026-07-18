@@ -1,4 +1,4 @@
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, RequestHandler } from "express";
 import {
   ExtractionSchema,
   FieldDefinition,
@@ -11,15 +11,20 @@ import {
 } from "../schemas/dynamic.js";
 import { logger } from "../config/logger.js";
 
+function getUserId(req: Request): string {
+  return req.user!.id;
+}
+
 export function createSchemaRoutes(
   schemaRegistry: SchemaRegistry,
   llmProvider: LLMProvider
 ): Router {
   const router = Router();
 
-  router.get("/api/schemas", (_req: Request, res: Response) => {
+  router.get("/api/schemas", async (req: Request, res: Response) => {
     try {
-      const schemas = schemaRegistry.listSchemas().map((s) => ({
+      const userId = getUserId(req);
+      const schemas = (await schemaRegistry.listSchemas(userId)).map((s) => ({
         id: s.id,
         name: s.name,
         description: s.description,
@@ -34,9 +39,10 @@ export function createSchemaRoutes(
     }
   });
 
-  router.get("/api/schemas/:id", (req: Request, res: Response) => {
+  router.get("/api/schemas/:id", async (req: Request, res: Response) => {
     try {
-      const schema = schemaRegistry.getSchema(req.params.id);
+      const userId = getUserId(req);
+      const schema = await schemaRegistry.getSchema(req.params.id, userId);
       if (!schema) {
         return res.status(404).json({ error: "Schema not found" });
       }
@@ -49,6 +55,7 @@ export function createSchemaRoutes(
 
   router.post("/api/schemas", async (req: Request, res: Response) => {
     try {
+      const userId = getUserId(req);
       const {
         id,
         name,
@@ -77,7 +84,7 @@ export function createSchemaRoutes(
         return res.status(400).json({ error: "Invalid schema id" });
       }
 
-      const existing = schemaRegistry.getSchema(schemaId);
+      const existing = await schemaRegistry.getSchema(schemaId, userId);
       if (existing?.isBuiltin) {
         return res.status(409).json({ error: "Cannot modify built-in schema" });
       }
@@ -97,20 +104,23 @@ export function createSchemaRoutes(
         updatedAt: now,
       };
 
-      const saved = await schemaRegistry.register(schema);
+      const saved = await schemaRegistry.register(schema, userId);
       res.status(existing ? 200 : 201).json(saved);
     } catch (error) {
       logger.error(error, "Save schema failed");
-      res.status(500).json({
+      const message = error instanceof Error ? error.message : "Unknown error";
+      const status = message.includes("not accessible") ? 403 : 500;
+      res.status(status).json({
         error: "Failed to save schema",
-        details: error instanceof Error ? error.message : "Unknown error",
+        details: message,
       });
     }
   });
 
   router.delete("/api/schemas/:id", async (req: Request, res: Response) => {
     try {
-      const existing = schemaRegistry.getSchema(req.params.id);
+      const userId = getUserId(req);
+      const existing = await schemaRegistry.getSchema(req.params.id, userId);
       if (!existing) {
         return res.status(404).json({ error: "Schema not found" });
       }
@@ -118,7 +128,7 @@ export function createSchemaRoutes(
         return res.status(409).json({ error: "Cannot delete built-in schema" });
       }
 
-      await schemaRegistry.unregister(req.params.id);
+      await schemaRegistry.unregister(req.params.id, userId);
       res.status(204).send();
     } catch (error) {
       logger.error(error, "Delete schema failed");

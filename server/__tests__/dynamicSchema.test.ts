@@ -13,6 +13,8 @@ import { SchemaRegistry } from "../src/registry/index";
 import { getBuiltinSchemaSeeds } from "../src/registry/builtinSeeds";
 import { validate } from "../src/pipeline/index";
 
+const TEST_USER_ID = "00000000-0000-4000-8000-000000000001";
+
 describe("dynamic schema utilities", () => {
   it("slugifySchemaId converts names to ids", () => {
     expect(slugifySchemaId("Purchase Order")).toBe("purchase_order");
@@ -72,7 +74,7 @@ describe("SchemaRegistry seeding", () => {
 
   it("seeds built-in schemas idempotently", async () => {
     await registry.initialize();
-    const types = registry.listTypes();
+    const types = await registry.listTypes(TEST_USER_ID);
     expect(types.map((t) => t.id).sort()).toEqual([
       "invoice",
       "meeting_notes",
@@ -80,8 +82,8 @@ describe("SchemaRegistry seeding", () => {
     ]);
   });
 
-  it("getEntry returns validators for invoice", () => {
-    const entry = registry.getEntry("invoice");
+  it("getEntry returns validators for invoice", async () => {
+    const entry = await registry.getEntry("invoice", TEST_USER_ID);
     expect(entry.validators.length).toBeGreaterThan(0);
     expect(entry.fieldDefinitions?.length).toBeGreaterThan(0);
   });
@@ -107,8 +109,8 @@ describe("validate parity for seeded invoice", () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
-  it("validates a complete invoice without structural email/date errors", () => {
-    const { errors } = validate(
+  it("validates a complete invoice without structural email/date errors", async () => {
+    const { errors } = await validate(
       {
         invoiceNumber: "INV-1",
         invoiceDate: "2025-01-01",
@@ -126,7 +128,8 @@ describe("validate parity for seeded invoice", () => {
         notes: "",
       },
       "invoice",
-      registry
+      registry,
+      TEST_USER_ID
     );
 
     const structural = errors.filter(
