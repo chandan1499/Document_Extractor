@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { ExtractedDocument, ExtractionSchemaSummary } from "../types/index";
-import { listDocuments, listAllDocuments, listSchemas } from "../services/api";
+import { ExtractedDocument } from "../types/index";
+import { listDocuments, listAllDocuments } from "../services/api";
+import { useSchemas } from "../context/SchemasContext";
 import DocumentModal from "./DocumentModal";
 import Papa from "papaparse";
 import { humanizeLabel } from "../utils/labels";
@@ -24,18 +25,10 @@ export default function DocumentList() {
   const [selectedDocument, setSelectedDocument] =
     useState<ExtractedDocument | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [schemaOptions, setSchemaOptions] = useState<ExtractionSchemaSummary[]>(
-    []
-  );
+  const { schemas: schemaOptions } = useSchemas();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const schemaName = (id: string) =>
     schemaOptions.find((s) => s.id === id)?.name ?? id;
-
-  useEffect(() => {
-    listSchemas()
-      .then(setSchemaOptions)
-      .catch(() => setSchemaOptions([]));
-  }, []);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);

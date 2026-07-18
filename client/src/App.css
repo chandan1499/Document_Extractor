@@ -32,6 +32,14 @@ body {
   overflow: hidden;
 }
 
+.view-loading {
+  min-height: 12rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gray);
+}
+
 .app {
   display: flex;
   flex-direction: column;

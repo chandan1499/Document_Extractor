@@ -1,16 +1,12 @@
-import { useEffect, useState } from "react";
-import {
-  ExtractionSchemaSummary,
-  FieldDefinition,
-  FieldType,
-} from "../types/index";
+import { useState } from "react";
+import { FieldDefinition, FieldType } from "../types/index";
 import {
   deleteSchema,
   getSchema,
-  listSchemas,
   proposeSchema,
   saveSchema,
 } from "../services/api";
+import { useSchemas } from "../context/SchemasContext";
 import "../styles/SchemaManager.css";
 
 type Tab = "fields" | "propose";
@@ -30,9 +26,8 @@ function emptyField(): FieldDefinition {
 }
 
 export default function SchemaManager() {
-  const [schemas, setSchemas] = useState<ExtractionSchemaSummary[]>([]);
+  const { schemas, loading, refreshSchemas } = useSchemas();
   const [tab, setTab] = useState<Tab>("fields");
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [proposing, setProposing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,22 +43,6 @@ export default function SchemaManager() {
   const [sampleText, setSampleText] = useState("");
   const [proposeName, setProposeName] = useState("");
   const [proposeDescription, setProposeDescription] = useState("");
-
-  const loadSchemas = async () => {
-    setLoading(true);
-    try {
-      const data = await listSchemas();
-      setSchemas(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load schemas");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadSchemas();
-  }, []);
 
   const resetDraft = () => {
     setSelectedId("");
@@ -122,7 +101,7 @@ export default function SchemaManager() {
         prompt: prompt.trim() || undefined,
       });
       setSuccess("Schema saved");
-      await loadSchemas();
+      await refreshSchemas();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save schema");
     } finally {
@@ -137,7 +116,7 @@ export default function SchemaManager() {
       await deleteSchema(selectedId);
       setSuccess("Schema deleted");
       resetDraft();
-      await loadSchemas();
+      await refreshSchemas();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete schema");
     }

@@ -1,6 +1,7 @@
-import { ReactNode } from "react";
+import { lazy, ReactNode, Suspense } from "react";
 import { useAuth } from "../context/AuthContext";
-import LoginPage from "./LoginPage";
+
+const LoginPage = lazy(() => import("./LoginPage"));
 
 export default function AuthGate({ children }: { children: ReactNode }) {
   const { session, loading } = useAuth();
@@ -14,7 +15,17 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   }
 
   if (!session) {
-    return <LoginPage />;
+    return (
+      <Suspense
+        fallback={
+          <div className="auth-loading">
+            <p>Loading...</p>
+          </div>
+        }
+      >
+        <LoginPage />
+      </Suspense>
+    );
   }
 
   return <>{children}</>;

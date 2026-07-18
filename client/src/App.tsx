@@ -1,15 +1,25 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { ExtractedDocument } from "./types/index";
-import UploadArea from "./components/UploadArea";
-import ReviewPanel from "./components/ReviewPanel";
-import DocumentList from "./components/DocumentList";
-import SchemaManager from "./components/SchemaManager";
 import AuthGate from "./components/AuthGate";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { SchemasProvider } from "./context/SchemasContext";
 import "./App.css";
 import "./styles/LoginPage.css";
 
+const UploadArea = lazy(() => import("./components/UploadArea"));
+const ReviewPanel = lazy(() => import("./components/ReviewPanel"));
+const DocumentList = lazy(() => import("./components/DocumentList"));
+const SchemaManager = lazy(() => import("./components/SchemaManager"));
+
 type AppView = "upload" | "review" | "list" | "schemas";
+
+function ViewLoading() {
+  return (
+    <div className="view-loading">
+      <p>Loading...</p>
+    </div>
+  );
+}
 
 function AppContent() {
   const { user, signOut } = useAuth();
@@ -67,25 +77,27 @@ function AppContent() {
       </header>
 
       <main className="app-main">
-        {view === "upload" && (
-          <UploadArea
-            onDocumentExtracted={handleDocumentExtracted}
-            loading={loading}
-            setLoading={setLoading}
-          />
-        )}
+        <Suspense fallback={<ViewLoading />}>
+          {view === "upload" && (
+            <UploadArea
+              onDocumentExtracted={handleDocumentExtracted}
+              loading={loading}
+              setLoading={setLoading}
+            />
+          )}
 
-        {view === "review" && currentDoc && (
-          <ReviewPanel
-            document={currentDoc}
-            onSaved={handleDocumentSaved}
-            onCancel={handleBackToList}
-          />
-        )}
+          {view === "review" && currentDoc && (
+            <ReviewPanel
+              document={currentDoc}
+              onSaved={handleDocumentSaved}
+              onCancel={handleBackToList}
+            />
+          )}
 
-        {view === "list" && <DocumentList />}
+          {view === "list" && <DocumentList />}
 
-        {view === "schemas" && <SchemaManager />}
+          {view === "schemas" && <SchemaManager />}
+        </Suspense>
       </main>
 
       <footer className="app-footer">
@@ -99,7 +111,9 @@ export default function App() {
   return (
     <AuthProvider>
       <AuthGate>
-        <AppContent />
+        <SchemasProvider>
+          <AppContent />
+        </SchemasProvider>
       </AuthGate>
     </AuthProvider>
   );

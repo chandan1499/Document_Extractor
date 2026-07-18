@@ -1,11 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useDropzone } from "react-dropzone";
-import { ExtractedDocument, ExtractionSchemaSummary } from "../types/index";
-import {
-  extractDocument,
-  extractDocumentFromFile,
-  listSchemas,
-} from "../services/api";
+import { ExtractedDocument } from "../types/index";
+import { extractDocument, extractDocumentFromFile } from "../services/api";
+import { useSchemas } from "../context/SchemasContext";
 import "../styles/UploadArea.css";
 
 interface UploadAreaProps {
@@ -21,14 +18,8 @@ export default function UploadArea({
 }: UploadAreaProps) {
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [schemas, setSchemas] = useState<ExtractionSchemaSummary[]>([]);
   const [schemaId, setSchemaId] = useState("");
-
-  useEffect(() => {
-    listSchemas()
-      .then(setSchemas)
-      .catch(() => setSchemas([]));
-  }, []);
+  const { schemas } = useSchemas();
 
   const onDrop = async (acceptedFiles: File[]) => {
     setError(null);
