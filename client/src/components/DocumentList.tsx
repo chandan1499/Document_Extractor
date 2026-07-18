@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { ExtractedDocument } from "../types/index";
-import { listDocuments, listAllDocuments } from "../services/api";
+import { useStorage } from "../storage/StorageContext";
 import { useSchemas } from "../context/SchemasContext";
 import DocumentModal from "./DocumentModal";
 import Papa from "papaparse";
@@ -26,6 +26,7 @@ export default function DocumentList() {
     useState<ExtractedDocument | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const { schemas: schemaOptions } = useSchemas();
+  const { storage } = useStorage();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const schemaName = (id: string) =>
     schemaOptions.find((s) => s.id === id)?.name ?? id;
@@ -66,7 +67,7 @@ export default function DocumentList() {
     setError(null);
 
     try {
-      const result = await listDocuments(buildFilters());
+      const result = await storage.listDocuments(buildFilters());
       setDocuments(result.items);
       setTotal(result.total);
       setTotalPages(result.totalPages);
@@ -102,15 +103,29 @@ export default function DocumentList() {
     return filters;
   };
 
+  const fetchAllDocuments = async () => {
+    const all: ExtractedDocument[] = [];
+    let page = 1;
+    let totalPages = 1;
+    const filters = getExportFilters();
+    while (page <= totalPages) {
+      const result = await storage.listDocuments({ ...filters, page, limit: 100 });
+      all.push(...result.items);
+      totalPages = result.totalPages;
+      page += 1;
+    }
+    return all;
+  };
+
   const handleExportJSON = async () => {
-    const allDocs = await listAllDocuments(getExportFilters());
+    const allDocs = await fetchAllDocuments();
     const json = JSON.stringify(allDocs, null, 2);
     const blob = new Blob([json], { type: "application/json" });
     downloadFile(blob, "documents.json");
   };
 
   const handleExportCSV = async () => {
-    const allDocs = await listAllDocuments(getExportFilters());
+    const allDocs = await fetchAllDocuments();
     if (allDocs.length === 0) return;
 
     const flatDocs = allDocs.map((doc) => ({

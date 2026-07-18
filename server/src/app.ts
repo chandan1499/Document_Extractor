@@ -10,7 +10,11 @@ import {
 import { SchemaRegistry } from "./registry/index.js";
 import { logger } from "./config/logger.js";
 import { config } from "./config/logger.js";
-import { requireAuth } from "./middleware/auth.js";
+import { optionalAuth, injectTestUser } from "./middleware/auth.js";
+import {
+  GuestQuotaStore,
+  MemoryGuestQuotaStore,
+} from "./middleware/guestQuota.js";
 
 export interface AppDeps {
   docRepo: DocumentRepository;
@@ -18,6 +22,7 @@ export interface AppDeps {
   llm: LLMProvider;
   schemaRegistry: SchemaRegistry;
   upload?: Multer;
+  guestQuotaStore?: GuestQuotaStore;
   /** When set, skips JWT verification and injects this user (tests only). */
   testUserId?: string;
 }
@@ -38,16 +43,13 @@ export function createApp(deps: AppDeps): Express {
   });
 
   if (deps.testUserId) {
-    app.use((req, _res, next) => {
-      req.user = {
-        id: deps.testUserId!,
-        email: `${deps.testUserId}@test.local`,
-      };
-      next();
-    });
+    app.use(injectTestUser(deps.testUserId));
   } else {
-    app.use(requireAuth);
+    app.use(optionalAuth);
   }
+
+  const guestQuotaStore =
+    deps.guestQuotaStore ?? new MemoryGuestQuotaStore();
 
   app.use(
     createRoutes(
@@ -55,7 +57,8 @@ export function createApp(deps: AppDeps): Express {
       deps.correctionRepo,
       deps.llm,
       deps.schemaRegistry,
-      deps.upload
+      deps.upload,
+      guestQuotaStore
     )
   );
 

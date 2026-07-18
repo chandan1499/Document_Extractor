@@ -67,3 +67,9 @@ CREATE INDEX IF NOT EXISTS idx_extraction_schemas_user_id ON extraction_schemas 
 CREATE INDEX IF NOT EXISTS idx_documents_user_id ON documents (user_id);
 CREATE INDEX IF NOT EXISTS idx_corrections_user_id ON corrections (user_id);
 CREATE INDEX IF NOT EXISTS idx_guidelines_user_id ON guidelines (user_id);
+
+CREATE TABLE IF NOT EXISTS guest_extract_usage (
+  guest_id TEXT PRIMARY KEY,
+  extract_count INT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

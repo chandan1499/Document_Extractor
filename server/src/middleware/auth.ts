@@ -39,6 +39,86 @@ function setUserFromPayload(
   return true;
 }
 
+async function authenticateRequest(
+  req: Request,
+  res: Response,
+  token: string
+): Promise<boolean> {
+  if (config.supabaseUrl) {
+    try {
+      const { payload } = await jwtVerify(token, getJwks());
+      if (setUserFromPayload(req, payload)) {
+        return true;
+      }
+      return false;
+    } catch {
+      // Fall through to legacy HS256 verification for older projects.
+    }
+  }
+
+  if (!config.supabaseJwtSecret) {
+    res.status(500).json({ error: "Auth is not configured" });
+    return false;
+  }
+
+  try {
+    const payload = jwt.verify(
+      token,
+      config.supabaseJwtSecret
+    ) as SupabaseJwtPayload;
+
+    if (!setUserFromPayload(req, payload)) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Sets req.user when a valid Bearer token is present; continues without user otherwise. */
+export async function optionalAuth(
+  req: Request,
+  _res: Response,
+  next: NextFunction
+) {
+  const header = req.headers.authorization;
+  if (!header?.startsWith("Bearer ")) {
+    return next();
+  }
+
+  const token = header.slice("Bearer ".length).trim();
+  if (!token) {
+    return next();
+  }
+
+  if (config.supabaseUrl) {
+    try {
+      const { payload } = await jwtVerify(token, getJwks());
+      if (setUserFromPayload(req, payload)) {
+        return next();
+      }
+    } catch {
+      // Fall through to legacy HS256 verification for older projects.
+    }
+  }
+
+  if (config.supabaseJwtSecret) {
+    try {
+      const payload = jwt.verify(
+        token,
+        config.supabaseJwtSecret
+      ) as SupabaseJwtPayload;
+      setUserFromPayload(req, payload);
+    } catch {
+      // Ignore invalid tokens for optional auth.
+    }
+  }
+
+  next();
+}
+
+/** Requires a valid JWT and sets req.user. */
 export async function requireAuth(
   req: Request,
   res: Response,
@@ -54,35 +134,26 @@ export async function requireAuth(
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  if (config.supabaseUrl) {
-    try {
-      const { payload } = await jwtVerify(token, getJwks());
-      if (setUserFromPayload(req, payload)) {
-        return next();
-      }
-      return res.status(401).json({ error: "Unauthorized" });
-    } catch {
-      // Fall through to legacy HS256 verification for older projects.
-    }
-  }
-
-  if (!config.supabaseJwtSecret) {
-    return res.status(500).json({ error: "Auth is not configured" });
-  }
-
-  try {
-    const payload = jwt.verify(
-      token,
-      config.supabaseJwtSecret
-    ) as SupabaseJwtPayload;
-
-    if (!setUserFromPayload(req, payload)) {
+  const ok = await authenticateRequest(req, res, token);
+  if (!ok) {
+    if (!res.headersSent) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-    next();
-  } catch {
+    return;
+  }
+  next();
+}
+
+/** Requires req.user (use after optionalAuth). */
+export function requireAuthenticated(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  if (!req.user?.id) {
     return res.status(401).json({ error: "Unauthorized" });
   }
+  next();
 }
 
 /** Test-only middleware that injects a fixed user without JWT verification. */

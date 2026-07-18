@@ -43,6 +43,28 @@ export class SchemaRegistry {
     }
   }
 
+  isBuiltin(id: string): boolean {
+    return this.builtinCache.has(id);
+  }
+
+  listBuiltinTypes(): SchemaTypeInfo[] {
+    return Array.from(this.builtinCache.values()).map((s) => ({
+      id: s.id,
+      name: s.name,
+      description: s.description,
+      isBuiltin: true,
+    }));
+  }
+
+  entryFromSchema(schema: ExtractionSchema): RegistryEntry {
+    return {
+      schema: schema.jsonSchema,
+      prompt: schema.prompt,
+      validators: BUILTIN_VALIDATORS[schema.id] ?? [],
+      fieldDefinitions: schema.fieldDefinitions,
+    };
+  }
+
   async has(id: string, userId: string): Promise<boolean> {
     if (this.builtinCache.has(id)) return true;
     const schema = await this.repo.findById(id, userId);

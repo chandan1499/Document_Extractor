@@ -1,12 +1,7 @@
 import { useState } from "react";
 import { FieldDefinition, FieldType } from "../types/index";
-import {
-  deleteSchema,
-  getSchema,
-  proposeSchema,
-  saveSchema,
-} from "../services/api";
 import { useSchemas } from "../context/SchemasContext";
+import { useStorage } from "../storage/StorageContext";
 import "../styles/SchemaManager.css";
 
 type Tab = "fields" | "propose";
@@ -27,6 +22,7 @@ function emptyField(): FieldDefinition {
 
 export default function SchemaManager() {
   const { schemas, loading, refreshSchemas } = useSchemas();
+  const { storage } = useStorage();
   const [tab, setTab] = useState<Tab>("fields");
   const [saving, setSaving] = useState(false);
   const [proposing, setProposing] = useState(false);
@@ -61,7 +57,11 @@ export default function SchemaManager() {
       return;
     }
     try {
-      const schema = await getSchema(id);
+      const schema = await storage.getSchema(id);
+      if (!schema) {
+        resetDraft();
+        return;
+      }
       setSelectedId(schema.id);
       setName(schema.name);
       setDescription(schema.description);
@@ -93,7 +93,7 @@ export default function SchemaManager() {
       if (!name.trim()) throw new Error("Schema name is required");
       if (cleaned.length === 0) throw new Error("Add at least one field");
 
-      await saveSchema({
+      await storage.saveSchema({
         id: selectedId || undefined,
         name: name.trim(),
         description: description.trim(),
@@ -113,7 +113,7 @@ export default function SchemaManager() {
     if (!selectedId || isBuiltin) return;
     if (!confirm(`Delete schema "${name}"?`)) return;
     try {
-      await deleteSchema(selectedId);
+      await storage.deleteSchema(selectedId);
       setSuccess("Schema deleted");
       resetDraft();
       await refreshSchemas();
@@ -131,7 +131,7 @@ export default function SchemaManager() {
     setError(null);
     setSuccess(null);
     try {
-      const draft = await proposeSchema({
+      const draft = await storage.proposeSchema({
         sampleText,
         name: proposeName.trim() || undefined,
         description: proposeDescription.trim() || undefined,

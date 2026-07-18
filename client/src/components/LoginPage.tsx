@@ -1,13 +1,19 @@
 import { FormEvent, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { isSupabaseConfigured } from "../lib/supabase";
 import "../styles/LoginPage.css";
 
-export default function LoginPage() {
+interface LoginPageProps {
+  mode: "signin" | "signup";
+}
+
+export default function LoginPage({ mode }: LoginPageProps) {
   const { signIn, signUp } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -21,6 +27,9 @@ export default function LoginPage() {
             Supabase Auth is not configured. Set VITE_SUPABASE_URL and
             VITE_SUPABASE_ANON_KEY in your environment.
           </p>
+          <Link to="/" className="login-toggle">
+            Back to app
+          </Link>
         </div>
       </div>
     );
@@ -35,12 +44,16 @@ export default function LoginPage() {
     try {
       if (mode === "signin") {
         await signIn(email.trim(), password);
+        const from =
+          (location.state as { from?: { pathname?: string } } | null)?.from
+            ?.pathname ?? "/";
+        navigate(from, { replace: true });
       } else {
         await signUp(email.trim(), password);
         setMessage(
           "Account created. Check your email to confirm, then sign in."
         );
-        setMode("signin");
+        navigate("/login", { replace: true });
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Authentication failed");
@@ -55,8 +68,8 @@ export default function LoginPage() {
         <h1>Document Extraction</h1>
         <p className="login-subtitle">
           {mode === "signin"
-            ? "Sign in to upload, extract, and manage your documents."
-            : "Create an account to save your schemas and documents privately."}
+            ? "Sign in to sync local data and get unlimited extractions."
+            : "Create an account to save your schemas and documents to the cloud."}
         </p>
 
         <form className="login-form" onSubmit={handleSubmit}>
@@ -95,19 +108,19 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <button
-          type="button"
-          className="login-toggle"
-          onClick={() => {
-            setMode(mode === "signin" ? "signup" : "signin");
-            setError(null);
-            setMessage(null);
-          }}
-        >
-          {mode === "signin"
-            ? "Need an account? Sign up"
-            : "Already have an account? Sign in"}
-        </button>
+        {mode === "signin" ? (
+          <Link to="/signup" className="login-toggle">
+            Need an account? Sign up
+          </Link>
+        ) : (
+          <Link to="/login" className="login-toggle">
+            Already have an account? Sign in
+          </Link>
+        )}
+
+        <Link to="/" className="login-toggle">
+          Continue as guest
+        </Link>
       </div>
     </div>
   );

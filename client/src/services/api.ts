@@ -7,18 +7,27 @@ import {
   PaginatedResult,
   ProposedSchemaDraft,
 } from "../types/index";
+import { LocalDataBundle } from "../storage/types";
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/$/, "");
 
 interface AuthHandlers {
   getAccessToken: () => Promise<string | null>;
   onUnauthorized: () => Promise<void>;
+  isAuthenticated: () => boolean;
 }
 
 let authHandlers: AuthHandlers | null = null;
 
 export function setAuthHandlers(handlers: AuthHandlers) {
   authHandlers = handlers;
+}
+
+export interface ExtractRequestOptions {
+  schemaId?: string;
+  guestId?: string;
+  guidelines?: Guideline[];
+  schemaPayload?: ExtractionSchema;
 }
 
 async function authFetch(
@@ -47,17 +56,32 @@ async function authFetch(
     headers,
   });
 
-  if (response.status === 401 && authHandlers) {
+  if (
+    response.status === 401 &&
+    authHandlers?.isAuthenticated() &&
+    authHandlers.onUnauthorized
+  ) {
     await authHandlers.onUnauthorized();
   }
 
   return response;
 }
 
-export async function extractDocument(text: string, schemaId?: string) {
+export async function extractDocument(
+  text: string,
+  options: ExtractRequestOptions = {}
+) {
   const response = await authFetch("/extract", {
     method: "POST",
-    body: JSON.stringify({ text, schemaId }),
+    headers: options.guestId
+      ? { "X-Guest-Id": options.guestId }
+      : undefined,
+    body: JSON.stringify({
+      text,
+      schemaId: options.schemaId,
+      guidelines: options.guidelines,
+      schemaPayload: options.schemaPayload,
+    }),
   });
 
   if (!response.ok) {
@@ -74,16 +98,25 @@ export async function extractDocument(text: string, schemaId?: string) {
 
 export async function extractDocumentFromFile(
   file: File,
-  schemaId?: string
+  options: ExtractRequestOptions = {}
 ) {
   const formData = new FormData();
   formData.append("file", file);
-  if (schemaId) {
-    formData.append("schemaId", schemaId);
+  if (options.schemaId) {
+    formData.append("schemaId", options.schemaId);
+  }
+  if (options.guidelines?.length) {
+    formData.append("guidelines", JSON.stringify(options.guidelines));
+  }
+  if (options.schemaPayload) {
+    formData.append("schemaPayload", JSON.stringify(options.schemaPayload));
   }
 
   const response = await authFetch("/extract-file", {
     method: "POST",
+    headers: options.guestId
+      ? { "X-Guest-Id": options.guestId }
+      : undefined,
     body: formData,
   });
 
@@ -93,7 +126,10 @@ export async function extractDocumentFromFile(
       throw new Error(
         error.details || error.error || "Failed to extract document from file"
       );
-    } catch {
+    } catch (err) {
+      if (err instanceof Error && err.message !== "Failed to extract document from file") {
+        throw err;
+      }
       throw new Error(
         `Server error (${response.status}): ${response.statusText}`
       );
@@ -183,6 +219,27 @@ export async function submitCorrectionsBatch(
   }
 
   return await response.json();
+}
+
+export async function extractLearningRules(
+  docType: string,
+  corrections: Array<{
+    field: string;
+    originalValue: unknown;
+    correctedValue: unknown;
+  }>,
+  learningNotes?: string
+) {
+  const response = await authFetch("/learning-rules", {
+    method: "POST",
+    body: JSON.stringify({ docType, corrections, learningNotes }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to extract learning rules");
+  }
+
+  return (await response.json()) as { guidelines: Guideline[] };
 }
 
 export async function submitCorrection(
@@ -305,4 +362,18 @@ export async function proposeSchema(payload: {
     );
   }
   return (await response.json()) as ProposedSchemaDraft;
+}
+
+export async function syncLocal(bundle: LocalDataBundle) {
+  const response = await authFetch("/sync-local", {
+    method: "POST",
+    body: JSON.stringify(bundle),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(
+      (err as { error?: string }).error || "Failed to sync local data"
+    );
+  }
+  return await response.json();
 }

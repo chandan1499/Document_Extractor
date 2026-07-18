@@ -7,6 +7,7 @@ import { PostgresCorrectionRepository } from "./repository/PostgresCorrectionRep
 import { PostgresSchemaRepository } from "./repository/SchemaRepository.js";
 import { SchemaRegistry } from "./registry/index.js";
 import { getPool, runMigrations } from "./db/pool.js";
+import { PostgresGuestQuotaStore } from "./middleware/guestQuota.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -41,6 +42,7 @@ async function main() {
     llm: llmProvider,
     schemaRegistry,
     upload,
+    guestQuotaStore: new PostgresGuestQuotaStore(pool),
   });
 
   app.listen(config.port, () => {

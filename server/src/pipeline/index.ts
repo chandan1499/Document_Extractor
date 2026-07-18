@@ -7,6 +7,7 @@ import {
   ExtractionChange,
   SchemaTypeInfo,
   FieldMeta,
+  ExtractionSchema,
 } from "../types.js";
 import { SchemaRegistry } from "../registry/index.js";
 import { buildZodFromFields } from "../schemas/dynamic.js";
@@ -20,6 +21,7 @@ import {
 
 export interface ExtractDocumentOptions {
   schemaId?: string;
+  schemaOverride?: ExtractionSchema;
 }
 
 /**
@@ -89,7 +91,8 @@ export async function extract<T>(
   llmProvider: LLMProvider,
   schemaRegistry: SchemaRegistry,
   userId: string,
-  guidelines?: Guideline[]
+  guidelines?: Guideline[],
+  schemaOverride?: ExtractionSchema
 ): Promise<{
   data: T;
   rawResponse: string;
@@ -97,7 +100,9 @@ export async function extract<T>(
   fieldMeta?: FieldMeta[];
 }> {
   try {
-    const entry = await schemaRegistry.getEntry(docType, userId);
+    const entry = schemaOverride
+      ? schemaRegistry.entryFromSchema(schemaOverride)
+      : await schemaRegistry.getEntry(docType, userId);
 
     const { data, appliedChanges, fieldMeta } = await llmProvider.extract<T>(
       text,
@@ -134,12 +139,15 @@ export async function validate(
   data: Record<string, unknown>,
   docType: DocType,
   schemaRegistry: SchemaRegistry,
-  userId: string
+  userId: string,
+  schemaOverride?: ExtractionSchema
 ): Promise<{ errors: ValidationIssue[]; warnings: ValidationIssue[] }> {
   const errors: ValidationIssue[] = [];
   const warnings: ValidationIssue[] = [];
 
-  const entry = await schemaRegistry.getEntry(docType, userId);
+  const entry = schemaOverride
+    ? schemaRegistry.entryFromSchema(schemaOverride)
+    : await schemaRegistry.getEntry(docType, userId);
 
   if (entry.fieldDefinitions && entry.fieldDefinitions.length > 0) {
     const schemaValidator = buildZodFromFields(entry.fieldDefinitions);
@@ -193,16 +201,24 @@ export async function extractDocument(
     let docType: DocType;
 
     if (options?.schemaId) {
-      if (!(await schemaRegistry.has(options.schemaId, userId))) {
+      if (options.schemaOverride) {
+        if (options.schemaOverride.id !== options.schemaId) {
+          throw new Error(`Unknown schema: ${options.schemaId}`);
+        }
+        docType = options.schemaId;
+      } else if (!(await schemaRegistry.has(options.schemaId, userId))) {
         throw new Error(`Unknown schema: ${options.schemaId}`);
+      } else {
+        docType = options.schemaId;
       }
-      docType = options.schemaId;
       logger.info({ docType, mode: "explicit" }, "Using explicit schema");
     } else {
       docType = await classify(
         cleaned,
         llmProvider,
-        await schemaRegistry.listTypes(userId)
+        userId
+          ? await schemaRegistry.listTypes(userId)
+          : schemaRegistry.listBuiltinTypes()
       );
     }
 
@@ -226,14 +242,16 @@ export async function extractDocument(
         llmProvider,
         schemaRegistry,
         userId,
-        applicableGuidelines
+        applicableGuidelines,
+        options?.schemaOverride
       );
 
     const { errors, warnings } = await validate(
       data,
       docType,
       schemaRegistry,
-      userId
+      userId,
+      options?.schemaOverride
     );
 
     const alignedMeta = ensureFieldMetaCoverage(

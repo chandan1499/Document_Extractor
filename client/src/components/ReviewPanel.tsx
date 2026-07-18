@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { ExtractedDocument, FieldMeta } from "../types/index";
-import { saveDocument, submitCorrectionsBatch } from "../services/api";
+import { useStorage } from "../storage/StorageContext";
 import { humanizeLabel } from "../utils/labels";
 import {
   collectRiskyFields,
@@ -165,6 +165,7 @@ export default function ReviewPanel({
   onSaved,
   onCancel,
 }: ReviewPanelProps) {
+  const { storage } = useStorage();
   const [editedData, setEditedData] = useState(() => {
     const cleaned: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(document.extractedData)) {
@@ -321,11 +322,13 @@ export default function ReviewPanel({
         confidence: document.confidence,
       };
 
-      const saved = await saveDocument(docToSave);
+      const saved = await storage.saveDocument(docToSave);
 
       if (corrections.size > 0) {
-        await submitCorrectionsBatch(
+        await storage.submitCorrectionsBatch(
           saved.id,
+          saved.type,
+          saved.originalText,
           [...corrections.entries()].map(([field, correction]) => ({
             field,
             originalValue: correction.original,

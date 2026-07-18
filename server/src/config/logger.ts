@@ -14,6 +14,7 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL || "",
   supabaseUrl: process.env.SUPABASE_URL || "",
   supabaseJwtSecret: process.env.SUPABASE_JWT_SECRET || "",
+  guestExtractLimit: parseInt(process.env.GUEST_EXTRACT_LIMIT || "3", 10),
   logLevel: process.env.LOG_LEVEL || "info",
 };
 

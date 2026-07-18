@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useDropzone } from "react-dropzone";
 import { ExtractedDocument } from "../types/index";
-import { extractDocument, extractDocumentFromFile } from "../services/api";
 import { useSchemas } from "../context/SchemasContext";
+import { useStorage } from "../storage/StorageContext";
+import { useAuth } from "../context/AuthContext";
+import { getGuestQuota } from "../storage/guestQuota";
 import "../styles/UploadArea.css";
 
 interface UploadAreaProps {
@@ -20,8 +23,21 @@ export default function UploadArea({
   const [error, setError] = useState<string | null>(null);
   const [schemaId, setSchemaId] = useState("");
   const { schemas } = useSchemas();
+  const { extractDocument, extractDocumentFromFile } = useStorage();
+  const { session } = useAuth();
+  const [guestQuota, setGuestQuota] = useState(getGuestQuota);
+
+  useEffect(() => {
+    if (!session) {
+      setGuestQuota(getGuestQuota());
+    }
+  }, [session]);
+
+  const extractDisabled =
+    loading || (!session && !guestQuota.canExtract);
 
   const onDrop = async (acceptedFiles: File[]) => {
+    if (extractDisabled) return;
     setError(null);
     setLoading(true);
 
@@ -53,6 +69,7 @@ export default function UploadArea({
   });
 
   const handlePasteExtract = async () => {
+    if (extractDisabled) return;
     if (!text.trim()) {
       setError("Please enter some text");
       return;
@@ -71,6 +88,9 @@ export default function UploadArea({
         schemaId || undefined
       );
       onDocumentExtracted(doc);
+      if (!session) {
+        setGuestQuota(getGuestQuota());
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Extraction failed");
     } finally {
@@ -88,6 +108,9 @@ export default function UploadArea({
         schemaId || undefined
       );
       onDocumentExtracted(doc);
+      if (!session) {
+        setGuestQuota(getGuestQuota());
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Extraction failed");
     } finally {
@@ -99,13 +122,30 @@ export default function UploadArea({
     <div className={`upload-area ${loading ? "loading-active" : ""}`}>
       <h2>Extract Data from Documents</h2>
 
+      {!session && (
+        <p className="guest-quota-banner">
+          {guestQuota.canExtract ? (
+            <>
+              Local mode — {guestQuota.remaining} of {guestQuota.limit} free
+              extractions remaining.{" "}
+              <Link to="/login">Sign in</Link> for unlimited access.
+            </>
+          ) : (
+            <>
+              You&apos;ve used all {guestQuota.limit} free extractions.{" "}
+              <Link to="/login">Sign in</Link> for unlimited access.
+            </>
+          )}
+        </p>
+      )}
+
       <div className="schema-select-row">
         <label htmlFor="schema-select">Document type</label>
         <select
           id="schema-select"
           value={schemaId}
           onChange={(e) => setSchemaId(e.target.value)}
-          disabled={loading}
+          disabled={extractDisabled}
           className="schema-select"
         >
           <option value="">Auto-detect type</option>
@@ -125,12 +165,12 @@ export default function UploadArea({
             onChange={(e) => setText(e.target.value)}
             placeholder="Paste your document text here..."
             className="paste-input"
-            disabled={loading}
+            disabled={extractDisabled}
           />
           <button
             onClick={handlePasteExtract}
             className="btn btn-primary"
-            disabled={loading || !text.trim()}
+            disabled={extractDisabled || !text.trim()}
           >
             {loading ? "Processing..." : "Extract Data"}
           </button>
@@ -143,9 +183,9 @@ export default function UploadArea({
           </p>
           <div
             {...getRootProps()}
-            className={`dropzone ${isDragActive ? "active" : ""} ${loading ? "disabled" : ""}`}
+            className={`dropzone ${isDragActive ? "active" : ""} ${extractDisabled ? "disabled" : ""}`}
           >
-            <input {...getInputProps()} disabled={loading} />
+            <input {...getInputProps()} disabled={extractDisabled} />
             {isDragActive ? (
               <p>Drop your files here...</p>
             ) : (

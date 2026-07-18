@@ -72,6 +72,7 @@
 }
 
 .login-toggle {
+  display: block;
   margin-top: 1rem;
   width: 100%;
   background: none;
@@ -79,6 +80,8 @@
   color: var(--primary);
   cursor: pointer;
   font-size: 0.95rem;
+  text-align: center;
+  text-decoration: none;
 }
 
 .login-toggle:hover {
@@ -138,4 +141,44 @@
 
 .app-header-top h1 {
   margin-bottom: 0;
+}
+
+.auth-link {
+  padding: 0.45rem 0.85rem;
+  border: 1px solid var(--border);
+  background: white;
+  border-radius: 4px;
+  text-decoration: none;
+  color: var(--dark);
+  font-size: 0.9rem;
+}
+
+.auth-link-primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+
+.auth-link:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.auth-link-primary:hover {
+  background: var(--primary-dark);
+  color: white;
+}
+
+.guest-quota-banner {
+  background: #fff3cd;
+  border: 1px solid #ffeeba;
+  color: #856404;
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+}
+
+.guest-quota-banner a {
+  color: var(--primary);
+  font-weight: 600;
 }

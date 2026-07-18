@@ -4,12 +4,14 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { getSupabaseClient, isSupabaseConfigured } from "../lib/supabase";
 import { setAuthHandlers } from "../services/api";
+import { mergeLocalOnLogin } from "../storage/mergeLocalOnLogin";
 
 interface AuthContextValue {
   user: User | null;
@@ -26,6 +28,11 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const sessionRef = useRef<Session | null>(null);
+
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
 
   const getAccessToken = useCallback(async () => {
     if (!isSupabaseConfigured()) return null;
@@ -68,6 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthHandlers({
       getAccessToken,
       onUnauthorized: signOut,
+      isAuthenticated: () => Boolean(sessionRef.current),
     });
   }, [getAccessToken, signOut]);
 
@@ -78,6 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       password,
     });
     if (error) throw error;
+    await mergeLocalOnLogin();
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {

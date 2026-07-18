@@ -351,6 +351,26 @@ Try the live app at https://document-extractor-01.netlify.app/ or run locally:
    - Frontend: http://localhost:5173 (Vite proxies `/api` → http://localhost:4000)
    - Backend: http://localhost:4000
 
+### App routes & guest mode
+
+The client uses React Router so reload keeps the current screen:
+
+| Route | Screen |
+|-------|--------|
+| `/` | Upload |
+| `/documents` | Saved documents |
+| `/schemas` | Schema manager |
+| `/login` | Sign in |
+| `/signup` | Create account |
+
+**Guest mode (logged out):** the full app is usable without signing in. Documents, custom schemas, corrections, and guidelines are stored in **browser localStorage**. Upload/extract still calls the server LLM/OCR API, but list/save operations stay local.
+
+**Guest extract limit:** logged-out users get **3 extractions** (configurable via `GUEST_EXTRACT_LIMIT` on the server). The upload tab shows remaining free extractions; sign in for unlimited access.
+
+**Sign in:** local data is bulk-synced to Postgres via `POST /api/sync-local`, then localStorage is cleared. Signed-in users use the database for all CRUD operations.
+
+Netlify serves the SPA with a fallback redirect (`/*` → `/index.html`) so direct loads of `/documents`, `/login`, etc. work in production.
+
    Or run separately:
    ```bash
    cd server && npm run dev   # Terminal 1
@@ -370,6 +390,8 @@ Not included in this MVP, but ready to containerize. Suggested:
 ## Future Improvements
 
 ### Recently Completed
+- ✅ **URL routing** for Upload, Documents, Schemas, Login, and Signup (reload-safe tabs)
+- ✅ **Guest mode** with localStorage persistence and 3-extract trial quota; login syncs local data to Postgres
 - ✅ **Field trust layer**: per-field `fieldMeta` (confidence, sourceText, alternatives, reason) on every extraction
 - ✅ **Source highlighting** in review panel anchored to cleaned `extractionText`
 - ✅ **Validation → confidence merge** (`adjustFieldMetaFromValidation`) for all doc types

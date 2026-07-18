@@ -102,6 +102,18 @@ export interface Guideline {
   createdAt: string;
 }
 
+export interface Correction {
+  id: string;
+  docType: DocType;
+  field: string;
+  originalValue: unknown;
+  correctedValue: unknown;
+  contextSnippet?: string;
+  scopeKey?: string;
+  userExplanation?: string;
+  createdAt: string;
+}
+
 export interface PaginatedResult<T> {
   items: T[];
   total: number;

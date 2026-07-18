@@ -8,9 +8,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { listSchemas } from "../services/api";
 import { ExtractionSchemaSummary } from "../types/index";
 import { useAuth } from "./AuthContext";
+import { useStorage } from "../storage/StorageContext";
 
 interface SchemasContextValue {
   schemas: ExtractionSchemaSummary[];
@@ -24,6 +24,7 @@ const SchemasContext = createContext<SchemasContextValue | null>(null);
 
 export function SchemasProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth();
+  const { storage } = useStorage();
   const [schemas, setSchemas] = useState<ExtractionSchemaSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,17 +40,10 @@ export function SchemasProvider({ children }: { children: ReactNode }) {
   }, [session?.access_token]);
 
   const fetchSchemas = useCallback(async () => {
-    if (!session) {
-      setSchemas([]);
-      setError(null);
-      loadedRef.current = false;
-      return;
-    }
-
     setLoading(true);
     setError(null);
     try {
-      const data = await listSchemas();
+      const data = await storage.listSchemas();
       setSchemas(data);
       loadedRef.current = true;
     } catch (err) {
@@ -59,10 +53,9 @@ export function SchemasProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, [session]);
+  }, [storage]);
 
   const ensureSchemasLoaded = useCallback(async () => {
-    if (!session) return;
     if (loadedRef.current) return;
     if (loadPromiseRef.current) return loadPromiseRef.current;
 
@@ -71,7 +64,7 @@ export function SchemasProvider({ children }: { children: ReactNode }) {
     });
     loadPromiseRef.current = promise;
     return promise;
-  }, [session, fetchSchemas]);
+  }, [fetchSchemas]);
 
   const refreshSchemas = useCallback(async () => {
     loadedRef.current = false;

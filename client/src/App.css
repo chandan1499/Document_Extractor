@@ -75,17 +75,67 @@ body {
   cursor: pointer;
   transition: all 0.3s ease;
   font-weight: 500;
+  text-decoration: none;
+  color: var(--dark); 
+}
+
+.nav-btn:visited {
+  color: var(--dark);
 }
 
 .nav-btn:hover {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--dark);
+  text-decoration: none;
 }
 
-.nav-btn.active {
+.nav-btn.active,
+.nav-btn.active:visited {
   background: var(--primary);
   color: white;
   border-color: var(--primary);
+}
+
+.nav-btn-disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+  color: var(--gray);
+  background: var(--light);
+  border-color: var(--border);
+  padding: 0.35rem 0.85rem;
+}
+
+.nav-btn-disabled-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  line-height: 1.2;
+}
+
+.nav-btn-disabled-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 500;
+  color: var(--gray);
+}
+
+.nav-btn-auth-icon {
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.nav-btn-disabled-hint {
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: var(--gray);
+  letter-spacing: 0.01em;
+}
+
+.nav-btn-disabled:hover {
+  border-color: var(--border);
+  color: var(--gray);
 }
 
 .app-main {

@@ -1,8 +1,19 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+import {
+  Navigate,
+  NavLink,
+  Outlet,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useOutletContext,
+} from "react-router-dom";
 import { ExtractedDocument } from "./types/index";
-import AuthGate from "./components/AuthGate";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { SchemasProvider } from "./context/SchemasContext";
+import { StorageProvider } from "./storage/StorageContext";
+import LoginPage from "./components/LoginPage";
 import "./App.css";
 import "./styles/LoginPage.css";
 
@@ -11,7 +22,11 @@ const ReviewPanel = lazy(() => import("./components/ReviewPanel"));
 const DocumentList = lazy(() => import("./components/DocumentList"));
 const SchemaManager = lazy(() => import("./components/SchemaManager"));
 
-type AppView = "upload" | "review" | "list" | "schemas";
+interface UploadOutletContext {
+  onDocumentExtracted: (doc: ExtractedDocument) => void;
+  loading: boolean;
+  setLoading: (loading: boolean) => void;
+}
 
 function ViewLoading() {
   return (
@@ -21,25 +36,61 @@ function ViewLoading() {
   );
 }
 
-function AppContent() {
-  const { user, signOut } = useAuth();
-  const [view, setView] = useState<AppView>("upload");
+function UploadRoute() {
+  const { onDocumentExtracted, loading, setLoading } =
+    useOutletContext<UploadOutletContext>();
+
+  return (
+    <UploadArea
+      onDocumentExtracted={onDocumentExtracted}
+      loading={loading}
+      setLoading={setLoading}
+    />
+  );
+}
+
+function AppLayout() {
+  const { user, session, signOut, loading } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [currentDoc, setCurrentDoc] = useState<ExtractedDocument | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [extractLoading, setExtractLoading] = useState(false);
+
+  useEffect(() => {
+    setCurrentDoc(null);
+  }, [location.pathname]);
 
   const handleDocumentExtracted = (doc: ExtractedDocument) => {
     setCurrentDoc(doc);
-    setView("review");
   };
 
   const handleDocumentSaved = () => {
     setCurrentDoc(null);
-    setView("list");
+    navigate("/documents");
   };
 
   const handleBackToList = () => {
-    setView("list");
     setCurrentDoc(null);
+    navigate("/documents");
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/login");
+  };
+
+  if (loading) {
+    return (
+      <div className="auth-loading">
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
+  const outletContext: UploadOutletContext = {
+    onDocumentExtracted: handleDocumentExtracted,
+    loading: extractLoading,
+    setLoading: setExtractLoading,
   };
 
   return (
@@ -48,55 +99,87 @@ function AppContent() {
         <div className="app-header-top">
           <h1>📄 Document Extraction</h1>
           <div className="app-user-menu">
-            <span className="app-user-email">{user?.email}</span>
-            <button type="button" className="logout-btn" onClick={() => signOut()}>
-              Log out
-            </button>
+            {session ? (
+              <>
+                <span className="app-user-email">{user?.email}</span>
+                <button
+                  type="button"
+                  className="logout-btn"
+                  onClick={() => void handleSignOut()}
+                >
+                  Log out
+                </button>
+              </>
+            ) : (
+              <>
+                <NavLink to="/login" className="auth-link">
+                  Log in
+                </NavLink>
+                <NavLink to="/signup" className="auth-link auth-link-primary">
+                  Sign up
+                </NavLink>
+              </>
+            )}
           </div>
         </div>
         <nav className="app-nav">
-          <button
-            className={`nav-btn ${view === "upload" ? "active" : ""}`}
-            onClick={() => setView("upload")}
+          <NavLink
+            to="/"
+            end
+            className={({ isActive }) =>
+              `nav-btn ${isActive && !currentDoc ? "active" : ""}`
+            }
           >
             Upload
-          </button>
-          <button
-            className={`nav-btn ${view === "list" ? "active" : ""}`}
-            onClick={() => setView("list")}
+          </NavLink>
+          <NavLink
+            to="/documents"
+            className={({ isActive }) =>
+              `nav-btn ${isActive && !currentDoc ? "active" : ""}`
+            }
           >
             Documents
-          </button>
-          <button
-            className={`nav-btn ${view === "schemas" ? "active" : ""}`}
-            onClick={() => setView("schemas")}
-          >
-            Schemas
-          </button>
+          </NavLink>
+          {session ? (
+            <NavLink
+              to="/schemas"
+              className={({ isActive }) =>
+                `nav-btn ${isActive && !currentDoc ? "active" : ""}`
+              }
+            >
+              Schemas
+            </NavLink>
+          ) : (
+            <span
+              className="nav-btn nav-btn-disabled"
+              aria-disabled="true"
+              aria-label="Schemas — sign in required"
+            >
+              <span className="nav-btn-disabled-content">
+                <span className="nav-btn-disabled-label">
+                  <span className="nav-btn-auth-icon" aria-hidden="true">
+                    🔒
+                  </span>
+                  Schemas
+                </span>
+                <span className="nav-btn-disabled-hint">Sign in to access</span>
+              </span>
+            </span>
+          )}
         </nav>
       </header>
 
       <main className="app-main">
         <Suspense fallback={<ViewLoading />}>
-          {view === "upload" && (
-            <UploadArea
-              onDocumentExtracted={handleDocumentExtracted}
-              loading={loading}
-              setLoading={setLoading}
-            />
-          )}
-
-          {view === "review" && currentDoc && (
+          {currentDoc ? (
             <ReviewPanel
               document={currentDoc}
               onSaved={handleDocumentSaved}
               onCancel={handleBackToList}
             />
+          ) : (
+            <Outlet context={outletContext} />
           )}
-
-          {view === "list" && <DocumentList />}
-
-          {view === "schemas" && <SchemaManager />}
         </Suspense>
       </main>
 
@@ -107,14 +190,61 @@ function AppContent() {
   );
 }
 
+function RequireAuth({ children }: { children: ReactNode }) {
+  const { session, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) {
+    return (
+      <div className="auth-loading">
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+
+  return <>{children}</>;
+}
+
+function GuestOnlyLogin({ mode }: { mode: "signin" | "signup" }) {
+  const { session, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="auth-loading">
+        <p>Loading...</p>
+      </div>
+    );
+  }
+  if (session) {
+    return <Navigate to="/" replace />;
+  }
+  return <LoginPage mode={mode} />;
+}
+
 export default function App() {
   return (
     <AuthProvider>
-      <AuthGate>
+      <StorageProvider>
         <SchemasProvider>
-          <AppContent />
+          <Routes>
+            <Route path="/login" element={<GuestOnlyLogin mode="signin" />} />
+            <Route path="/signup" element={<GuestOnlyLogin mode="signup" />} />
+            <Route element={<AppLayout />}>
+              <Route path="/" element={<UploadRoute />} />
+              <Route path="/documents" element={<DocumentList />} />
+              <Route path="/schemas" element={
+                <RequireAuth>
+                  <SchemaManager />
+                </RequireAuth>
+              } />
+            </Route>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
         </SchemasProvider>
-      </AuthGate>
+      </StorageProvider>
     </AuthProvider>
   );
 }
