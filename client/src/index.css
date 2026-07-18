@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Scoped to auth pages so App.css hex vars (--primary: #0066cc) do not break shadcn. */
+.auth-page {
+  --background: 0 0% 100%;
+  --foreground: 222 11% 15%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 11% 15%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 11% 15%;
+  --primary: 210 100% 40%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 210 40% 96%;
+  --secondary-foreground: 222 11% 15%;
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 16% 47%;
+  --accent: 210 40% 96%;
+  --accent-foreground: 222 11% 15%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 214 32% 91%;
+  --input: 214 32% 91%;
+  --ring: 210 100% 40%;
+  --radius: 0.5rem;
+
+  color: hsl(var(--foreground));
+  background-color: hsl(var(--background));
+}
+
+.auth-page a {
+  text-decoration: none;
+}
+
+.auth-page button {
+  font-family: inherit;
+}

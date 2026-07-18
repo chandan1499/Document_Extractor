@@ -1,11 +1,35 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { AlertCircle, CheckCircle2 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { isSupabaseConfigured } from "../lib/supabase";
-import "../styles/LoginPage.css";
+import AuthFeaturesPanel from "./AuthFeaturesPanel";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface LoginPageProps {
   mode: "signin" | "signup";
+}
+
+function AuthPageShell({ children }: { children: ReactNode }) {
+  return (
+    <div className="auth-page fixed inset-0 z-50 overflow-y-auto md:grid md:h-screen md:grid-cols-2 md:overflow-hidden">
+      <AuthFeaturesPanel />
+      <div className="flex items-center justify-center bg-muted/30 px-6 py-10 md:h-full md:overflow-y-auto md:px-12">
+        <div className="w-full max-w-md py-4">{children}</div>
+      </div>
+    </div>
+  );
 }
 
 export default function LoginPage({ mode }: LoginPageProps) {
@@ -20,18 +44,31 @@ export default function LoginPage({ mode }: LoginPageProps) {
 
   if (!isSupabaseConfigured()) {
     return (
-      <div className="login-page">
-        <div className="login-card">
-          <h1>Document Extraction</h1>
-          <p className="login-error">
-            Supabase Auth is not configured. Set VITE_SUPABASE_URL and
-            VITE_SUPABASE_ANON_KEY in your environment.
-          </p>
-          <Link to="/" className="login-toggle">
-            Back to app
-          </Link>
-        </div>
-      </div>
+      <AuthPageShell>
+        <Card>
+          <CardHeader>
+            <CardTitle>Configuration required</CardTitle>
+            <CardDescription>
+              Supabase Auth is not configured for this environment.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Missing environment variables</AlertTitle>
+              <AlertDescription>
+                Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your
+                environment.
+              </AlertDescription>
+            </Alert>
+          </CardContent>
+          <CardFooter className="flex flex-col items-stretch gap-2">
+            <Button asChild variant="outline" className="w-full">
+              <Link to="/">Back to app</Link>
+            </Button>
+          </CardFooter>
+        </Card>
+      </AuthPageShell>
     );
   }
 
@@ -62,66 +99,95 @@ export default function LoginPage({ mode }: LoginPageProps) {
     }
   };
 
+  const isSignIn = mode === "signin";
+
   return (
-    <div className="login-page">
-      <div className="login-card">
-        <h1>Document Extraction</h1>
-        <p className="login-subtitle">
-          {mode === "signin"
-            ? "Sign in to sync local data and get unlimited extractions."
-            : "Create an account to save your schemas and documents to the cloud."}
-        </p>
+    <AuthPageShell>
+      <Card>
+        <CardHeader>
+          <CardTitle>{isSignIn ? "Sign in" : "Create account"}</CardTitle>
+          <CardDescription>
+            {isSignIn
+              ? "Sync local data and get unlimited extractions."
+              : "Save your schemas and documents to the cloud."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form className="space-y-4" onSubmit={handleSubmit} id="auth-form">
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                autoComplete="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
 
-        <form className="login-form" onSubmit={handleSubmit}>
-          <label htmlFor="email">Email</label>
-          <input
-            id="email"
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                autoComplete={isSignIn ? "current-password" : "new-password"}
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={6}
+              />
+            </div>
 
-          <label htmlFor="password">Password</label>
-          <input
-            id="password"
-            type="password"
-            autoComplete={
-              mode === "signin" ? "current-password" : "new-password"
-            }
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={6}
-          />
+            {error && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Error</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
 
-          {error && <p className="login-error">{error}</p>}
-          {message && <p className="login-message">{message}</p>}
-
-          <button type="submit" className="login-submit" disabled={submitting}>
+            {message && (
+              <Alert className="border-green-200 bg-green-50 text-green-900 [&>svg]:text-green-600">
+                <CheckCircle2 className="h-4 w-4" />
+                <AlertTitle>Success</AlertTitle>
+                <AlertDescription>{message}</AlertDescription>
+              </Alert>
+            )}
+          </form>
+        </CardContent>
+        <CardFooter className="flex flex-col items-stretch gap-4">
+          <Button
+            type="submit"
+            form="auth-form"
+            className="w-full"
+            disabled={submitting}
+          >
             {submitting
               ? "Please wait..."
-              : mode === "signin"
+              : isSignIn
                 ? "Sign in"
                 : "Sign up"}
-          </button>
-        </form>
+          </Button>
 
-        {mode === "signin" ? (
-          <Link to="/signup" className="login-toggle">
-            Need an account? Sign up
-          </Link>
-        ) : (
-          <Link to="/login" className="login-toggle">
-            Already have an account? Sign in
-          </Link>
-        )}
-
-        <Link to="/" className="login-toggle">
-          Continue as guest
-        </Link>
-      </div>
-    </div>
+          <div className="flex w-full flex-col items-center gap-2 text-center text-sm">
+            {isSignIn ? (
+              <Button asChild variant="link" className="h-auto p-0">
+                <Link to="/signup">Need an account? Sign up</Link>
+              </Button>
+            ) : (
+              <Button asChild variant="link" className="h-auto p-0">
+                <Link to="/login">Already have an account? Sign in</Link>
+              </Button>
+            )}
+            <Button asChild variant="ghost" className="h-auto text-muted-foreground">
+              <Link to="/">Continue as guest</Link>
+            </Button>
+          </div>
+        </CardFooter>
+      </Card>
+    </AuthPageShell>
   );
 }
