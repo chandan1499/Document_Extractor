@@ -38,7 +38,9 @@ The core challenge is scale — organizations deal with a sea of unstructured do
 - Centered loading overlay during extraction
 - Scrollable error/warning section at bottom of extracted fields
 - **User accounts** via Supabase Auth (email/password sign-in, sign-out)
-- **Private data per user** — custom schemas, documents, corrections, and guidelines are scoped to the logged-in account
+- **Private data per user** — custom schemas, documents, corrections, and guidelines are scoped to the logged-in account when signed in
+- **Guest mode** — logged-out users can upload, extract (limited), and manage documents locally in the browser; sign in to sync to the cloud
+- **URL routing** — `/`, `/documents`, `/schemas`, `/login`, `/signup` (reload-safe tabs)
 
 ### Intentionally Excluded (& Why)
 - **DOCX/RTF Support** — JSON store + text-only parsing keeps the scope focused on core extraction logic. Extending to format-specific libraries is a one-liner in the pipeline.
@@ -71,16 +73,19 @@ Extraction returns structured `data` plus per-field **`fieldMeta`** (confidence,
     /routes            Express API endpoints
     /config            Logger, env config
     /utils             File extraction, span location, fieldMeta alignment, validation merge
-  /db                  schema.sql (documents, corrections, guidelines, extraction_schemas)
+  /db                  schema.sql (documents, corrections, guidelines, extraction_schemas, guest_extract_usage)
   /__tests__           Tests (Vitest)
   
 /client
   /src
-    /components        Upload, Review, DocumentList, SchemaManager, DocumentModal, LowConfidenceSaveDialog
+    /components        Upload, Review, DocumentList, SchemaManager, DocumentModal, LoginPage
+    /context           AuthContext, SchemasContext, StorageContext
+    /storage           Guest quota, localStorage/API backends, merge-on-login
     /services          API client
     /types             TypeScript types
     /utils             Labels, risky-field collection for save confirmation
     /styles            Component-level CSS
+    App.tsx            React Router layout + tab navigation
   /public              Static assets
   index.html
   vite.config.ts
@@ -190,7 +195,9 @@ interface CorrectionRepository {
 - ✅ CSV file parsing with formatted text conversion
 - ✅ Image extraction with OCR (tesseract.js for JPG, PNG, GIF, WebP)
 - ✅ Automatic document type detection
-- ✅ Custom extraction schemas (SchemaManager UI + API)
+- ✅ **Guest trial mode** — 3 free extractions without sign-in; localStorage persistence; sync on login
+- ✅ **React Router** — reload-safe tabs and auth routes
+- ✅ Custom extraction schemas (SchemaManager UI + propose/save API; auth required for CRUD)
 - ✅ Structured data extraction to JSON (Groq, strict schemas)
 - ✅ **Per-field confidence + source grounding** (`fieldMeta` with alternatives for ambiguous documents)
 - ✅ Validation with errors & warnings merged into field confidence
@@ -246,7 +253,7 @@ interface CorrectionRepository {
 - **Testing**: Vitest + Supertest
 
 ### Frontend
-- **Framework**: React 18
+- **Framework**: React 18 + React Router 6
 - **Build**: Vite
 - **Language**: TypeScript
 - **File handling**: react-dropzone
@@ -291,14 +298,20 @@ Alternatives (future):
 
 ## Quick Demo
 
-Try the live app at https://document-extractor-01.netlify.app/ or run locally:
+Try the live app at https://document-extractor-01.netlify.app/ or run locally.
 
-1. **Upload** — Paste sample invoice text (or use Advanced → upload a PDF/CSV/image).
-2. **Review** — Check extracted fields; confidence badges flag uncertain values. Click a field to see its source highlighted in the document text. Use the candidate switcher when multiple values were found (e.g. two invoices in one file).
-3. **Learn** — Add an explanation when correcting: *"Vendor is always ACME Cloud, not ACME Cloud Billing"*.
-4. **Save** — If low-confidence or validation-flagged fields remain (and you haven't edited them), a confirmation dialog lists them before saving. Choose **Go back and review** or **Save anyway**.
-5. **Query** — Open **Documents**, search with `vendor.name` = `ACME` or `total.gt` = `50000`.
-6. **Learning tab** — See the guideline and correction history from step 3.
+**As a guest (no account):**
+1. **Upload** — Paste sample text or upload a file (built-in schema types only; **3 free extractions**).
+2. **Review & save** — Data is stored in **browser localStorage** until you sign in.
+3. **Documents** — Browse locally saved records (reload `/documents` keeps the tab).
+
+**After sign in:**
+4. **Schemas** — Create and manage custom extraction schemas (nav tab is locked with 🔒 when logged out).
+5. **Sync** — Local guest data is uploaded to Postgres via `POST /api/sync-local`, then cleared from localStorage.
+6. **Query** — Search saved documents with `vendor.name`, `total.gt`, free-text `q`, etc.
+7. **Learn** — Correction notes become guidelines for future extractions (unlimited extractions when authenticated).
+
+Review UX (confidence badges, source highlighting, save confirmation) works the same in guest and signed-in modes.
 
 ## Setup
 
@@ -333,6 +346,7 @@ Try the live app at https://document-extractor-01.netlify.app/ or run locally:
    ```bash
    cp .env.example server/.env
    # Edit server/.env — set DATABASE_URL, GROQ_API_KEY, SUPABASE_URL, SUPABASE_JWT_SECRET
+   # Optional: GUEST_EXTRACT_LIMIT=3 (default)
    # Check https://console.groq.com/keys for available models
    ```
 
@@ -351,31 +365,39 @@ Try the live app at https://document-extractor-01.netlify.app/ or run locally:
    - Frontend: http://localhost:5173 (Vite proxies `/api` → http://localhost:4000)
    - Backend: http://localhost:4000
 
-### App routes & guest mode
-
-The client uses React Router so reload keeps the current screen:
-
-| Route | Screen |
-|-------|--------|
-| `/` | Upload |
-| `/documents` | Saved documents |
-| `/schemas` | Schema manager |
-| `/login` | Sign in |
-| `/signup` | Create account |
-
-**Guest mode (logged out):** the full app is usable without signing in. Documents, custom schemas, corrections, and guidelines are stored in **browser localStorage**. Upload/extract still calls the server LLM/OCR API, but list/save operations stay local.
-
-**Guest extract limit:** logged-out users get **3 extractions** (configurable via `GUEST_EXTRACT_LIMIT` on the server). The upload tab shows remaining free extractions; sign in for unlimited access.
-
-**Sign in:** local data is bulk-synced to Postgres via `POST /api/sync-local`, then localStorage is cleared. Signed-in users use the database for all CRUD operations.
-
-Netlify serves the SPA with a fallback redirect (`/*` → `/index.html`) so direct loads of `/documents`, `/login`, etc. work in production.
-
    Or run separately:
    ```bash
-   cd server && npm run dev   # Terminal 1
-   cd client && npm run dev   # Terminal 2
+   cd server && yarn dev   # Terminal 1 — run `yarn install` from repo root first
+   cd client && yarn dev   # Terminal 2
    ```
+
+### App routes, guest mode & auth
+
+The client uses **React Router** so reload keeps the current screen:
+
+| Route | Screen | Logged out | Logged in |
+|-------|--------|------------|-----------|
+| `/` | Upload | ✅ | ✅ |
+| `/documents` | Saved documents | ✅ (localStorage) | ✅ (Postgres) |
+| `/schemas` | Schema manager | 🔒 Nav shown disabled; route redirects to login | ✅ |
+| `/login` | Sign in | ✅ | Redirects to `/` |
+| `/signup` | Create account | ✅ | Redirects to `/` |
+
+**Schemas tab (logged out):** still visible in the nav with a lock icon and “Sign in to access” so users know the feature exists. Direct navigation to `/schemas` redirects to `/login` and returns there after sign-in.
+
+**Guest mode:** Upload, extract, review, and document list work without an account. Data is stored in **browser localStorage** (documents, corrections, guidelines). Upload uses **built-in schema types** only; custom schema CRUD requires sign-in.
+
+**Guest extract limit:** **3 successful extractions** per browser profile (text or file). Enforced on the client (`localStorage` counter) and server (`guest_extract_usage` table + `X-Guest-Id` header). Configurable via `GUEST_EXTRACT_LIMIT` in `server/.env`. The upload tab shows remaining free extractions. **Sign in for unlimited extractions.**
+
+**Sign in:** Guest local data is bulk-synced to Postgres via `POST /api/sync-local`, then localStorage is cleared. All CRUD uses the API/database afterward.
+
+**Client storage layer:** `StorageContext` selects `localStorageBackend` (guest) or `apiBackend` (authenticated). Local keys cover documents, schemas, corrections, guidelines, `guestId`, and extract count. Built-in schema types ship in code for guest uploads; custom schemas sync on login (built-ins are skipped).
+
+**API auth (server):**
+- **Public (no JWT):** `GET /api/health`, `POST /api/extract`, `POST /api/extract-file`, `POST /api/schemas/propose`, `POST /api/learning-rules`
+- **JWT required:** document/schema CRUD, guidelines, corrections, `POST /api/sync-local`
+
+Netlify serves the SPA with a fallback redirect (`/*` → `/index.html`) so direct loads of `/documents`, `/login`, etc. work in production.
 
 5. **Run tests**
    ```bash
@@ -392,6 +414,7 @@ Not included in this MVP, but ready to containerize. Suggested:
 ### Recently Completed
 - ✅ **URL routing** for Upload, Documents, Schemas, Login, and Signup (reload-safe tabs)
 - ✅ **Guest mode** with localStorage persistence and 3-extract trial quota; login syncs local data to Postgres
+- ✅ **Schemas behind auth** — Schema manager and `/schemas` require sign-in; nav shows disabled tab with lock + hint when logged out
 - ✅ **Field trust layer**: per-field `fieldMeta` (confidence, sourceText, alternatives, reason) on every extraction
 - ✅ **Source highlighting** in review panel anchored to cleaned `extractionText`
 - ✅ **Validation → confidence merge** (`adjustFieldMetaFromValidation`) for all doc types
@@ -465,6 +488,11 @@ Configured via `netlify.toml` at the repo root:
   base = "client"
   command = "npm run build"
   publish = "dist"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
 ```
 
 Set these environment variables in the Netlify dashboard:
@@ -484,7 +512,7 @@ Configured via [`render.yaml`](render.yaml) or manually:
 - **Root directory:** `server`
 - **Build command:** `npm install && npm run build`
 - **Start command:** `npm start`
-- **Env vars:** `DATABASE_URL`, `GROQ_API_KEY`, `SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `PORT`, `EXTRACT_MODEL`, `CLASSIFY_MODEL`
+- **Env vars:** `DATABASE_URL`, `GROQ_API_KEY`, `SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `GUEST_EXTRACT_LIMIT`, `PORT`, `EXTRACT_MODEL`, `CLASSIFY_MODEL`
 
 **Supabase setup:**
 1. Create a free Supabase project
@@ -533,11 +561,12 @@ Response:
 4. **Groq model availability**: Model names vary by subscription tier. Always check https://console.groq.com/keys for available models and update `.env` accordingly.
 5. **OCR timeout**: Image OCR has a 30-second timeout. Very large or complex images may timeout.
 6. **Groq rate limits**: Free tier caps at 30 RPM (one request every 2 seconds). Fine for a demo, upgrade for production.
-7. **Auth required**: All API routes except `/api/health` require a valid Supabase JWT. Pre-auth demo data (`user_id IS NULL`) is not visible to new accounts.
-8. **PDF handling**: `pdf-parse` works for text-based PDFs only. Scanned PDFs (image-only) require OCR via image extraction.
-9. **CSV handling**: Converts CSV to formatted text; complex nested structures may not extract optimally.
-10. **Render cold starts**: Free-tier backend sleeps after inactivity; first request may take 30–60 seconds.
-11. **Multi-document PDFs**: Single upload produces one record; ambiguous fields show alternatives but do not auto-split into separate documents.
+7. **Guest extract quota**: Limited to 3 extractions per browser `guestId` (new incognito window = new quota). Soft trial limit, not IP-bound.
+8. **Auth for CRUD**: Document/schema persistence and sync require sign-in. Extract/propose/learning-rules work without JWT (guest extract sends `X-Guest-Id`).
+9. **PDF handling**: `pdf-parse` works for text-based PDFs only. Scanned PDFs (image-only) require OCR via image extraction.
+10. **CSV handling**: Converts CSV to formatted text; complex nested structures may not extract optimally.
+11. **Render cold starts**: Free-tier backend sleeps after inactivity; first request may take 30–60 seconds.
+12. **Multi-document PDFs**: Single upload produces one record; ambiguous fields show alternatives but do not auto-split into separate documents.
 
 ## README Maintenance
 This README should be updated as features change. Key sections to keep current:
